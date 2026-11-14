@@ -1,8 +1,13 @@
-# -- encoding: UTF-8 --
+from __future__ import annotations
+
 from babel.core import get_global
 
 
-def get_official_languages(territory, regional=False, de_facto=False):
+def get_official_languages(
+    territory: str,
+    regional: bool = False,
+    de_facto: bool = False,
+) -> tuple[str, ...]:
     """
     Get the official language(s) for the given territory.
 
@@ -16,13 +21,9 @@ def get_official_languages(territory, regional=False, de_facto=False):
                  by Babel.  If you need scientifically accurate information, use another source!
 
     :param territory: Territory code
-    :type territory: str
     :param regional: Whether to return regionally official languages too
-    :type regional: bool
     :param de_facto: Whether to return de-facto official languages too
-    :type de_facto: bool
     :return: Tuple of language codes
-    :rtype: tuple[str]
     """
 
     territory = str(territory).upper()
@@ -42,7 +43,9 @@ def get_official_languages(territory, regional=False, de_facto=False):
     return tuple(lang for _, lang in pairs)
 
 
-def get_territory_language_info(territory):
+def get_territory_language_info(
+    territory: str,
+) -> dict[str, dict[str, float | str | None]]:
     """
     Get a dictionary of language information for a territory.
 
@@ -63,9 +66,7 @@ def get_territory_language_info(territory):
     See https://www.unicode.org/cldr/charts/latest/supplemental/territory_language_information.html
 
     :param territory: Territory code
-    :type territory: str
     :return: Language information dictionary
-    :rtype: dict[str, dict]
     """
     territory = str(territory).upper()
     return get_global("territory_languages").get(territory, {}).copy()

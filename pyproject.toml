@@ -1,0 +1,169 @@
+[build-system]
+requires = ["hatchling~=1.27.0"]  # Bump when no longer Python 3.9
+build-backend = "hatchling.build"
+
+[project]
+name = "babel"
+dynamic = ["version"]
+description = "Internationalization utilities"
+readme = "README.rst"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+authors = [
+    { name = "Armin Ronacher", email = "armin.ronacher@active-4.com" },
+]
+maintainers = [
+    { name = "Aarni Koskela", email = "akx@iki.fi" },
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Programming Language :: Python",
+    "Topic :: Software Development :: Internationalization",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.optional-dependencies]
+# TODO: use a `dev` dependency group instead
+dev = [
+    "freezegun~=1.0",
+    "jinja2>=3.0",
+    "pytest-cov",
+    "pytest>=6.0",
+    "pytz",
+    "setuptools",
+    "tzdata;sys_platform == 'win32'",
+]
+
+[project.urls]
+Homepage = "https://babel.pocoo.org/"
+Source = "https://github.com/python-babel/babel"
+
+[tool.hatch.version]
+path = "babel/__init__.py"
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build]
+# babel/global.dat is gitignored, so must be force-included in both the sdist and the wheel
+artifacts = [
+    "**.dat",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/Makefile",
+    "/babel",
+    "/docs",
+    "/scripts",
+    "/tests",
+    "AUTHORS",
+    "CHANGES.rst",
+    "conftest.py",
+    "tox.ini",
+]
+
+[tool.hatch.build.targets.wheel]
+include = [
+    "/babel",
+]
+exclude = [
+    "/babel/locale-data/.gitignore",
+]
+
+[project.scripts]
+pybabel = "babel.messages.frontend:main"
+
+[project.entry-points."distutils.commands"]
+compile_catalog = "babel.messages.setuptools_frontend:compile_catalog"
+extract_messages = "babel.messages.setuptools_frontend:extract_messages"
+init_catalog = "babel.messages.setuptools_frontend:init_catalog"
+update_catalog = "babel.messages.setuptools_frontend:update_catalog"
+
+[project.entry-points."distutils.setup_keywords"]
+message_extractors = "babel.messages.setuptools_frontend:check_message_extractors"
+
+[project.entry-points."babel.checkers"]
+num_plurals = "babel.messages.checkers:num_plurals"
+python_format = "babel.messages.checkers:python_format"
+
+[project.entry-points."babel.extractors"]
+ignore = "babel.messages.extract:extract_nothing"
+python = "babel.messages.extract:extract_python"
+javascript = "babel.messages.extract:extract_javascript"
+
+[tool.ruff]
+target-version = "py39"
+extend-exclude = [
+    "tests/messages/data",
+]
+line-length = 95
+
+[tool.ruff.format]
+quote-style = "preserve"
+
+[tool.ruff.lint]
+select = [
+    "B",
+    "C",
+    "COM", # Trailing commas
+    "E",
+    "F",
+    "I", # import sorting
+    "SIM300", # Yoda conditions
+    "UP", # upgrades
+    "RUF022", # unsorted __all__
+    "PT", # pytest
+]
+ignore = [
+    "C901", # Complexity
+    "E501", # Line length
+    "E731", # Do not assign a lambda expression (we use them on purpose)
+    "E741", # Ambiguous variable name
+    "UP012", # "utf-8" is on purpose
+    "UP031", # A bunch of places where % formatting is better
+    "PT011", # TODO: add match= parameter to pytest.raises()
+    "PT030", # TODO: add match= parameter to pytest.warns()
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/import_cldr.py" = ["E402"]
+"babel/**" = ["PT"] # avoid pytest false positives outside tests
+
+[tool.pytest.ini_options]
+norecursedirs = [
+    "venv*",
+    ".*",
+    "_*",
+    "scripts",
+    "{args}"
+]
+doctest_optionflags = [
+    "ELLIPSIS",
+    "NORMALIZE_WHITESPACE",
+    "IGNORE_EXCEPTION_DETAIL"
+]
+markers = [
+    "all_locales: parameterize test with all locales"
+]
+filterwarnings = [
+    # The doctest for format_number would raise this, but we don't really want to see it.
+    "ignore:babel.numbers.format_decimal:DeprecationWarning",
+    # FixedOffsetTimezone is still being tested, but we don't want to see the deprecation warning.
+    "ignore:.*FixedOffsetTimezone:DeprecationWarning",
+]

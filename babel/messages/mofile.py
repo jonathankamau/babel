@@ -1,25 +1,29 @@
-# -*- coding: utf-8 -*-
 """
-    babel.messages.mofile
-    ~~~~~~~~~~~~~~~~~~~~~
+babel.messages.mofile
+~~~~~~~~~~~~~~~~~~~~~
 
-    Writing of files in the ``gettext`` MO (machine object) format.
+Writing of files in the ``gettext`` MO (machine object) format.
 
-    :copyright: (c) 2013-2021 by the Babel Team.
-    :license: BSD, see LICENSE for more details.
+:copyright: (c) 2013-2026 by the Babel Team.
+:license: BSD, see LICENSE for more details.
 """
+
+from __future__ import annotations
 
 import array
 import struct
+from typing import TYPE_CHECKING
 
 from babel.messages.catalog import Catalog, Message
 
+if TYPE_CHECKING:
+    from _typeshed import SupportsRead, SupportsWrite
 
-LE_MAGIC = 0x950412de
-BE_MAGIC = 0xde120495
+LE_MAGIC: int = 0x950412DE
+BE_MAGIC: int = 0xDE120495
 
 
-def read_mo(fileobj):
+def read_mo(fileobj: SupportsRead[bytes]) -> Catalog:
     """Read a binary MO file from the given file-like object and return a
     corresponding `Catalog` object.
 
@@ -48,26 +52,26 @@ def read_mo(fileobj):
         version, msgcount, origidx, transidx = unpack('>4I', buf[4:20])
         ii = '>II'
     else:
-        raise IOError(0, 'Bad magic number', filename)
+        raise OSError(0, 'Bad magic number', filename)
 
     # Now put all messages from the .mo file buffer into the catalog
     # dictionary
-    for i in range(0, msgcount):
-        mlen, moff = unpack(ii, buf[origidx:origidx + 8])
+    for _i in range(msgcount):
+        mlen, moff = unpack(ii, buf[origidx : origidx + 8])
         mend = moff + mlen
-        tlen, toff = unpack(ii, buf[transidx:transidx + 8])
+        tlen, toff = unpack(ii, buf[transidx : transidx + 8])
         tend = toff + tlen
         if mend < buflen and tend < buflen:
-            msg = buf[moff:mend]
-            tmsg = buf[toff:tend]
+            raw_msg: bytes = buf[moff:mend]
+            raw_tmsg: bytes = buf[toff:tend]
         else:
-            raise IOError(0, 'File is corrupt', filename)
+            raise OSError(0, 'File is corrupt', filename)
 
         # See if we're looking at GNU .mo conventions for metadata
         if mlen == 0:
             # Catalog description
             lastkey = key = None
-            for item in tmsg.splitlines():
+            for item in raw_tmsg.splitlines():
                 item = item.strip()
                 if not item:
                     continue
@@ -78,21 +82,25 @@ def read_mo(fileobj):
                 elif lastkey:
                     headers[lastkey] += b'\n' + item
 
-        if b'\x04' in msg:  # context
-            ctxt, msg = msg.split(b'\x04')
-        else:
-            ctxt = None
+        ctxt: str | None = None
+        msg: list[str] | str
+        tmsg: list[str] | str
 
-        if b'\x00' in msg:  # plural forms
-            msg = msg.split(b'\x00')
-            tmsg = tmsg.split(b'\x00')
-            if catalog.charset:
-                msg = [x.decode(catalog.charset) for x in msg]
-                tmsg = [x.decode(catalog.charset) for x in tmsg]
+        # > Contexts are stored by storing the concatenation of the context,
+        # > a EOT byte, and the original string, instead of the original string.
+        # - https://www.gnu.org/software/gettext/manual/html_node/MO-Files.html
+        ctxt_or_msg, sep, raw_msg = raw_msg.partition(b'\x04')
+        if sep:
+            ctxt = ctxt_or_msg.decode(catalog.charset)
         else:
-            if catalog.charset:
-                msg = msg.decode(catalog.charset)
-                tmsg = tmsg.decode(catalog.charset)
+            raw_msg = ctxt_or_msg
+
+        if b'\x00' in raw_msg:  # plural forms
+            msg = [x.decode(catalog.charset) for x in raw_msg.split(b'\x00')]
+            tmsg = [x.decode(catalog.charset) for x in raw_tmsg.split(b'\x00')]
+        else:
+            msg = raw_msg.decode(catalog.charset)
+            tmsg = raw_tmsg.decode(catalog.charset)
         catalog[msg] = Message(msg, tmsg, context=ctxt)
 
         # advance to next entry in the seek tables
@@ -103,7 +111,7 @@ def read_mo(fileobj):
     return catalog
 
 
-def write_mo(fileobj, catalog, use_fuzzy=False):
+def write_mo(fileobj: SupportsWrite[bytes], catalog: Catalog, use_fuzzy: bool = False) -> None:
     """Write a catalog to the specified file-like object using the GNU MO file
     format.
 
@@ -115,7 +123,7 @@ def write_mo(fileobj, catalog, use_fuzzy=False):
     >>> catalog = Catalog(locale='en_US')
     >>> catalog.add('foo', 'Voh')
     <Message ...>
-    >>> catalog.add((u'bar', u'baz'), (u'Bahr', u'Batz'))
+    >>> catalog.add(('bar', 'baz'), ('Bahr', 'Batz'))
     <Message ...>
     >>> catalog.add('fuz', 'Futz', flags=['fuzzy'])
     <Message ...>
@@ -132,19 +140,19 @@ def write_mo(fileobj, catalog, use_fuzzy=False):
     ...     translations.ugettext = translations.gettext
     ...     translations.ungettext = translations.ngettext
     >>> translations.ugettext('foo')
-    u'Voh'
+    'Voh'
     >>> translations.ungettext('bar', 'baz', 1)
-    u'Bahr'
+    'Bahr'
     >>> translations.ungettext('bar', 'baz', 2)
-    u'Batz'
+    'Batz'
     >>> translations.ugettext('fuz')
-    u'fuz'
+    'fuz'
     >>> translations.ugettext('Fizz')
-    u'Fizz'
+    'Fizz'
     >>> translations.ugettext('Fuzz')
-    u'Fuzz'
+    'Fuzz'
     >>> translations.ugettext('Fuzzes')
-    u'Fuzzes'
+    'Fuzzes'
 
     :param fileobj: the file-like object to write to
     :param catalog: the `Catalog` instance
@@ -152,35 +160,30 @@ def write_mo(fileobj, catalog, use_fuzzy=False):
                       in the output
     """
     messages = list(catalog)
-    messages[1:] = [m for m in messages[1:]
-                    if m.string and (use_fuzzy or not m.fuzzy)]
+    messages[1:] = [m for m in messages[1:] if m.string and (use_fuzzy or not m.fuzzy)]
     messages.sort()
 
-    ids = strs = b''
+    ids = bytearray()
+    strs = bytearray()
     offsets = []
 
     for message in messages:
         # For each string, we need size and file offset.  Each string is NUL
         # terminated; the NUL does not count into the size.
         if message.pluralizable:
-            msgid = b'\x00'.join([
-                msgid.encode(catalog.charset) for msgid in message.id
-            ])
+            msgid = b'\x00'.join(msgid.encode(catalog.charset) for msgid in message.id)
             msgstrs = []
             for idx, string in enumerate(message.string):
                 if not string:
                     msgstrs.append(message.id[min(int(idx), 1)])
                 else:
                     msgstrs.append(string)
-            msgstr = b'\x00'.join([
-                msgstr.encode(catalog.charset) for msgstr in msgstrs
-            ])
+            msgstr = b'\x00'.join(msgstr.encode(catalog.charset) for msgstr in msgstrs)
         else:
             msgid = message.id.encode(catalog.charset)
             msgstr = message.string.encode(catalog.charset)
         if message.context:
-            msgid = b'\x04'.join([message.context.encode(catalog.charset),
-                                  msgid])
+            msgid = b'\x04'.join([message.context.encode(catalog.charset), msgid])
         offsets.append((len(ids), len(msgid), len(strs), len(msgstr)))
         ids += msgid + b'\x00'
         strs += msgstr + b'\x00'
@@ -199,11 +202,15 @@ def write_mo(fileobj, catalog, use_fuzzy=False):
         voffsets += [l2, o2 + valuestart]
     offsets = koffsets + voffsets
 
-    fileobj.write(struct.pack('Iiiiiii',
-                              LE_MAGIC,                   # magic
-                              0,                          # version
-                              len(messages),              # number of entries
-                              7 * 4,                      # start of key index
-                              7 * 4 + len(messages) * 8,  # start of value index
-                              0, 0                        # size and offset of hash table
-                              ) + array.array.tobytes(array.array("i", offsets)) + ids + strs)
+    header = struct.pack(
+        'Iiiiiii',
+        LE_MAGIC,  # magic
+        0,  # version
+        len(messages),  # number of entries
+        7 * 4,  # start of key index
+        7 * 4 + len(messages) * 8,  # start of value index
+        0,
+        0,  # size and offset of hash table
+    )
+
+    fileobj.write(header + array.array.tobytes(array.array("i", offsets)) + ids + strs)

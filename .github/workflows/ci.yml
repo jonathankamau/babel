@@ -1,0 +1,187 @@
+name: CI
+
+# Since this same workflow file is used for both PRs and pushes,
+# Zizmor wants to flag all uses of caches as potential cache poisoning vulnerabilities.
+# I don't see a way to easily split this workflow into two separate files since
+# we do want to build the package for PRs, and then publish it from that exact
+# built artifact, if we're pushing to tags.
+
+on:  # zizmor: ignore[cache-poisoning]
+  push:
+    branches:
+      - master
+      - '*-maint'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - master
+      - '*-maint'
+
+permissions: {}
+
+jobs:
+  lint:
+    name: lint
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          cache-dependency-glob: ".github/workflows/*.yml"
+          cache-suffix: pre-commit-uv
+      - run: uv tool install pre-commit --with pre-commit-uv --force-reinstall
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-uv-v1-${{ hashFiles('.pre-commit-config.yaml') }}
+      - run: pre-commit run --all-files --show-diff-on-failure --color=always
+        env:
+          RUFF_OUTPUT_FORMAT: github
+  test:
+    name: test
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - "ubuntu-24.04"
+          - "windows-2025"
+          - "macos-26"
+        python-version:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+          - "3.15"
+          - "pypy3.10"
+    env:
+      BABEL_CLDR_NO_DOWNLOAD_PROGRESS: "1"
+      BABEL_CLDR_QUIET: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: cldr
+        key: cldr-${{ hashFiles('scripts/*cldr*') }}
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ matrix.python-version }}
+        allow-prereleases: true
+        # TODO: restore once https://github.com/pypa/pip/issues/14431 is resolved
+        cache: ${{ !(runner.os == 'Windows' && startsWith(matrix.python-version, 'pypy')) && 'pip' || '' }}
+        cache-dependency-path: "**/pyproject.toml"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        python -m pip install 'tox~=4.0' 'tox-gh-actions~=3.0'
+    - name: Run test via Tox
+      run: tox --skip-missing-interpreters
+      env:
+        COVERAGE_XML_PATH: ${{ runner.temp }}
+        BABEL_TOX_EXTRA_DEPS: pytest-github-actions-annotate-failures
+    - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      with:
+        directory: ${{ runner.temp }}
+        flags: ${{ matrix.os }}-${{ matrix.python-version }}
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: true
+  benchmark:
+    name: benchmark
+    permissions:
+      contents: read
+    runs-on: "ubuntu-24.04"
+    env:
+      BABEL_CLDR_NO_DOWNLOAD_PROGRESS: "1"
+      BABEL_CLDR_QUIET: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: cldr
+          key: cldr-${{ hashFiles('scripts/*cldr*') }}
+      - name: Set up Python 3.14
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.14"
+          activate-environment: 'true'
+      - run: uv pip install -e .[dev] pytest-codspeed
+      - run: make import-cldr
+      - uses: CodSpeedHQ/action@88472375d0a4572cf70a9f1fe3a4e0ab8da1b924 # v5.0.1
+        with:
+          mode: simulation
+          run: uv run pytest --codspeed tests/benchmarks/benchmark*py
+  build:
+    name: build
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    needs: lint
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: "pip"
+          cache-dependency-path: "**/pyproject.toml"
+      - run: pip install build -e .
+      - run: make import-cldr
+      - run: python -m build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist
+  publish:
+    name: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://pypi.org/p/babel/
+    permissions:
+      contents: write # Required for creating the GitHub release
+      id-token: write # Required for Trusted Publishing action and attestations
+      attestations: write # Required for build provenance attestations
+      artifact-metadata: write # Required for build provenance attestations
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - name: Generate SLSA build provenance attestations
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: 'dist/*'
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          verbose: true
+          print-hash: true
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE_PATH" "dist/babel-${TAG#v}.intoto.jsonl"
+          gh release create "$TAG" --draft --verify-tag --title "$TAG" dist/*.whl dist/*.tar.gz dist/*.intoto.jsonl

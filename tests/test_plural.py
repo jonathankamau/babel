@@ -1,20 +1,19 @@
-# -*- coding: utf-8 -*-
 #
-# Copyright (C) 2007-2011 Edgewall Software, 2013-2021 the Babel team
+# Copyright (C) 2007-2011 Edgewall Software, 2013-2025 the Babel team
 # All rights reserved.
 #
 # This software is licensed as described in the file LICENSE, which
 # you should have received as part of this distribution. The terms
-# are also available at http://babel.edgewall.org/wiki/License.
+# are also available at https://github.com/python-babel/babel/blob/master/LICENSE.
 #
 # This software consists of voluntary contributions made by many
 # individuals. For the exact contribution history, see the revision
-# history and logs, available at http://babel.edgewall.org/log/.
+# history and logs, available at https://github.com/python-babel/babel/commits/master/.
 import decimal
-import unittest
+
 import pytest
 
-from babel import plural, localedata
+from babel import Locale, localedata, plural
 
 EPSILON = decimal.Decimal("0.0001")
 
@@ -68,8 +67,8 @@ def test_plural_other_is_ignored():
 
 
 def test_to_javascript():
-    assert (plural.to_javascript({'one': 'n is 1'})
-            == "(function(n) { return (n == 1) ? 'one' : 'other'; })")
+    src = plural.to_javascript({'one': 'n is 1'})
+    assert src == "(function(n) { n = Math.abs(n); return (n == 1) ? 'one' : 'other'; })"
 
 
 def test_to_python():
@@ -83,8 +82,8 @@ def test_to_python():
 
 
 def test_to_gettext():
-    assert (plural.to_gettext({'one': 'n is 1', 'two': 'n is 2'})
-            == 'nplurals=3; plural=((n == 1) ? 0 : (n == 2) ? 1 : 2)')
+    src = plural.to_gettext({'one': 'n is 1', 'two': 'n is 2'})
+    assert src == 'nplurals=3; plural=((n == 1) ? 0 : (n == 2) ? 1 : 2);'
 
 
 def test_in_range_list():
@@ -115,12 +114,14 @@ def test_plural_within_rules():
     p = plural.PluralRule({'one': 'n is 1', 'few': 'n within 2,4,7..9'})
     assert repr(p) == "<PluralRule 'one: n is 1, few: n within 2,4,7..9'>"
     assert plural.to_javascript(p) == (
-        "(function(n) { "
+        "(function(n) { n = Math.abs(n); "
         "return ((n == 2) || (n == 4) || (n >= 7 && n <= 9))"
-        " ? 'few' : (n == 1) ? 'one' : 'other'; })")
+        " ? 'few' : (n == 1) ? 'one' : 'other'; })"
+    )
     assert plural.to_gettext(p) == (
         'nplurals=3; plural=(((n == 2) || (n == 4) || (n >= 7 && n <= 9))'
-        ' ? 1 : (n == 1) ? 0 : 2)')
+        ' ? 1 : (n == 1) ? 0 : 2);'
+    )
     assert p(0) == 'other'
     assert p(1) == 'one'
     assert p(2) == 'few'
@@ -134,7 +135,6 @@ def test_plural_within_rules():
 
 
 def test_locales_with_no_plural_rules_have_default():
-    from babel import Locale
     pf = Locale.parse('ii').plural_form
     assert pf(1) == 'other'
     assert pf(2) == 'other'
@@ -142,102 +142,75 @@ def test_locales_with_no_plural_rules_have_default():
 
 
 WELL_FORMED_TOKEN_TESTS = (
-    ('', []),
-    ('n = 1', [('value', '1'), ('symbol', '='), ('word', 'n'), ]),
-    ('n = 1 @integer 1', [('value', '1'), ('symbol', '='), ('word', 'n'), ]),
-    ('n is 1', [('value', '1'), ('word', 'is'), ('word', 'n'), ]),
-    ('n % 100 = 3..10', [('value', '10'), ('ellipsis', '..'), ('value', '3'),
-                         ('symbol', '='), ('value', '100'), ('symbol', '%'),
-                         ('word', 'n'), ]),
+    ("", []),
+    (
+        "n = 1",
+        [
+            ("value", "1"),
+            ("symbol", "="),
+            ("word", "n"),
+        ],
+    ),
+    (
+        "n = 1 @integer 1",
+        [
+            ("value", "1"),
+            ("symbol", "="),
+            ("word", "n"),
+        ],
+    ),
+    (
+        "n is 1",
+        [
+            ("value", "1"),
+            ("word", "is"),
+            ("word", "n"),
+        ],
+    ),
+    (
+        "n % 100 = 3..10",
+        [
+            ("value", "10"),
+            ("ellipsis", ".."),
+            ("value", "3"),
+            ("symbol", "="),
+            ("value", "100"),
+            ("symbol", "%"),
+            ("word", "n"),
+        ],
+    ),
 )
 
 
-@pytest.mark.parametrize('rule_text,tokens', WELL_FORMED_TOKEN_TESTS)
+@pytest.mark.parametrize(("rule_text", "tokens"), WELL_FORMED_TOKEN_TESTS)
 def test_tokenize_well_formed(rule_text, tokens):
     assert plural.tokenize_rule(rule_text) == tokens
 
 
-MALFORMED_TOKEN_TESTS = (
-    'a = 1', 'n ! 2',
-)
-
-
-@pytest.mark.parametrize('rule_text', MALFORMED_TOKEN_TESTS)
+@pytest.mark.parametrize('rule_text', ['a = 1', 'n ! 2'])
 def test_tokenize_malformed(rule_text):
     with pytest.raises(plural.RuleError):
         plural.tokenize_rule(rule_text)
 
 
-class TestNextTokenTestCase(unittest.TestCase):
-
-    def test_empty(self):
-        assert not plural.test_next_token([], '')
-
-    def test_type_ok_and_no_value(self):
-        assert plural.test_next_token([('word', 'and')], 'word')
-
-    def test_type_ok_and_not_value(self):
-        assert not plural.test_next_token([('word', 'and')], 'word', 'or')
-
-    def test_type_ok_and_value_ok(self):
-        assert plural.test_next_token([('word', 'and')], 'word', 'and')
-
-    def test_type_not_ok_and_value_ok(self):
-        assert not plural.test_next_token([('abc', 'and')], 'word', 'and')
+def test_next_token_empty():
+    assert not plural.test_next_token([], '')
 
 
-def make_range_list(*values):
-    ranges = []
-    for v in values:
-        if isinstance(v, int):
-            val_node = plural.value_node(v)
-            ranges.append((val_node, val_node))
-        else:
-            assert isinstance(v, tuple)
-            ranges.append((plural.value_node(v[0]),
-                           plural.value_node(v[1])))
-    return plural.range_list_node(ranges)
+def test_next_token_type_ok_and_no_value():
+    assert plural.test_next_token([('word', 'and')], 'word')
 
 
-class PluralRuleParserTestCase(unittest.TestCase):
+def test_next_token_type_ok_and_not_value():
+    assert not plural.test_next_token([('word', 'and')], 'word', 'or')
 
-    def setUp(self):
-        self.n = plural.ident_node('n')
 
-    def n_eq(self, v):
-        return 'relation', ('in', self.n, make_range_list(v))
+def test_next_token_type_ok_and_value_ok():
+    assert plural.test_next_token([('word', 'and')], 'word', 'and')
 
-    def test_error_when_unexpected_end(self):
-        with pytest.raises(plural.RuleError):
-            plural._Parser('n =')
 
-    def test_eq_relation(self):
-        assert plural._Parser('n = 1').ast == self.n_eq(1)
-
-    def test_in_range_relation(self):
-        assert plural._Parser('n = 2..4').ast == \
-            ('relation', ('in', self.n, make_range_list((2, 4))))
-
-    def test_negate(self):
-        assert plural._Parser('n != 1').ast == plural.negate(self.n_eq(1))
-
-    def test_or(self):
-        assert plural._Parser('n = 1 or n = 2').ast ==\
-            ('or', (self.n_eq(1), self.n_eq(2)))
-
-    def test_and(self):
-        assert plural._Parser('n = 1 and n = 2').ast ==\
-            ('and', (self.n_eq(1), self.n_eq(2)))
-
-    def test_or_and(self):
-        assert plural._Parser('n = 0 or n != 1 and n % 100 = 1..19').ast == \
-            ('or', (self.n_eq(0),
-                    ('and', (plural.negate(self.n_eq(1)),
-                             ('relation', ('in',
-                                           ('mod', (self.n,
-                                                    plural.value_node(100))),
-                                           (make_range_list((1, 19)))))))
-                    ))
+def test_next_token_type_not_ok_and_value_ok():
+    assert not plural.test_next_token([('abc', 'and')], 'word', 'and')
 
 
 EXTRACT_OPERANDS_TESTS = (
@@ -253,18 +226,20 @@ EXTRACT_OPERANDS_TESTS = (
 )
 
 
-@pytest.mark.parametrize('source,n,i,v,w,f,t', EXTRACT_OPERANDS_TESTS)
+@pytest.mark.parametrize(("source", "n", "i", "v", "w", "f", "t"), EXTRACT_OPERANDS_TESTS)
 def test_extract_operands(source, n, i, v, w, f, t):
-    e_n, e_i, e_v, e_w, e_f, e_t = plural.extract_operands(source)
+    e_n, e_i, e_v, e_w, e_f, e_t, e_c, e_e = plural.extract_operands(source)
     assert abs(e_n - decimal.Decimal(n)) <= EPSILON  # float-decimal conversion inaccuracy
     assert e_i == i
     assert e_v == v
     assert e_w == w
     assert e_f == f
     assert e_t == t
+    assert not e_c  # Not supported at present
+    assert not e_e  # Not supported at present
 
 
-@pytest.mark.parametrize('locale', ('ru', 'pl'))
+@pytest.mark.parametrize('locale', ['ru', 'pl'])
 def test_gettext_compilation(locale):
     # Test that new plural form elements introduced in recent CLDR versions
     # are compiled "down" to `n` when emitting Gettext rules.
@@ -272,7 +247,7 @@ def test_gettext_compilation(locale):
     chars = 'ivwft'
     # Test that these rules are valid for this test; i.e. that they contain at least one
     # of the gettext-unsupported characters.
-    assert any((" " + ch + " ") in rule for ch in chars for rule in ru_rules.values())
+    assert any(f" {ch} " in rule for ch in chars for rule in ru_rules.values())
     # Then test that the generated value indeed does not contain these.
     ru_rules_gettext = plural.to_gettext(ru_rules)
     assert not any(ch in ru_rules_gettext for ch in chars)

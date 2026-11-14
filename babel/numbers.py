@@ -1,57 +1,54 @@
-# -*- coding: utf-8 -*-
 """
-    babel.numbers
-    ~~~~~~~~~~~~~
+babel.numbers
+~~~~~~~~~~~~~
 
-    Locale dependent formatting and parsing of numeric data.
+Locale dependent formatting and parsing of numeric data.
 
-    The default locale for the functions in this module is determined by the
-    following environment variables, in that order:
+The default locale for the functions in this module is determined by the
+following environment variables, in that order:
 
-     * ``LC_NUMERIC``,
-     * ``LC_ALL``, and
-     * ``LANG``
+ * ``LC_MONETARY`` for currency related functions,
+ * ``LC_NUMERIC``, and
+ * ``LC_ALL``, and
+ * ``LANG``
 
-    :copyright: (c) 2013-2021 by the Babel Team.
-    :license: BSD, see LICENSE for more details.
+:copyright: (c) 2013-2026 by the Babel Team.
+:license: BSD, see LICENSE for more details.
 """
+
 # TODO:
 #  Padding and rounding increments in pattern:
 #  - https://www.unicode.org/reports/tr35/ (Appendix G.6)
+from __future__ import annotations
+
+import datetime
 import decimal
 import re
-from datetime import date as date_, datetime as datetime_
 import warnings
+from typing import Any, Literal, cast, overload
 
-from babel.core import default_locale, Locale, get_global
+from babel.core import Locale, default_locale, get_global
+from babel.localedata import LocaleDataDict
 
-try:
-    # Python 2
-    long
-except NameError:
-    # Python 3
-    long = int
-
-
+LC_MONETARY = default_locale(('LC_MONETARY', 'LC_NUMERIC'))
 LC_NUMERIC = default_locale('LC_NUMERIC')
 
 
 class UnknownCurrencyError(Exception):
-    """Exception thrown when a currency is requested for which no data is available.
-    """
+    """Exception thrown when a currency is requested for which no data is available."""
 
-    def __init__(self, identifier):
+    def __init__(self, identifier: str) -> None:
         """Create the exception.
         :param identifier: the identifier string of the unsupported currency
         """
-        Exception.__init__(self, 'Unknown currency %r.' % identifier)
+        Exception.__init__(self, f"Unknown currency {identifier!r}.")
 
         #: The identifier of the locale that could not be found.
         self.identifier = identifier
 
 
-def list_currencies(locale=None):
-    """ Return a `set` of normalized currency codes.
+def list_currencies(locale: Locale | str | None = None) -> set[str]:
+    """Return a `set` of normalized currency codes.
 
     .. versionadded:: 2.5.0
 
@@ -62,14 +59,12 @@ def list_currencies(locale=None):
     """
     # Get locale-scoped currencies.
     if locale:
-        currencies = Locale.parse(locale).currencies.keys()
-    else:
-        currencies = get_global('all_currencies')
-    return set(currencies)
+        return set(Locale.parse(locale).currencies)
+    return set(get_global('all_currencies'))
 
 
-def validate_currency(currency, locale=None):
-    """ Check the currency code is recognized by Babel.
+def validate_currency(currency: str, locale: Locale | str | None = None) -> None:
+    """Check the currency code is recognized by Babel.
 
     Accepts a ``locale`` parameter for fined-grained validation, working as
     the one defined above in ``list_currencies()`` method.
@@ -80,8 +75,8 @@ def validate_currency(currency, locale=None):
         raise UnknownCurrencyError(currency)
 
 
-def is_currency(currency, locale=None):
-    """ Returns `True` only if a currency is recognized by Babel.
+def is_currency(currency: str, locale: Locale | str | None = None) -> bool:
+    """Returns `True` only if a currency is recognized by Babel.
 
     This method always return a Boolean and never raise.
     """
@@ -94,8 +89,8 @@ def is_currency(currency, locale=None):
     return True
 
 
-def normalize_currency(currency, locale=None):
-    """Returns the normalized sting of any currency code.
+def normalize_currency(currency: str, locale: Locale | str | None = None) -> str | None:
+    """Returns the normalized identifier of any currency code.
 
     Accepts a ``locale`` parameter for fined-grained validation, working as
     the one defined above in ``list_currencies()`` method.
@@ -105,15 +100,19 @@ def normalize_currency(currency, locale=None):
     if isinstance(currency, str):
         currency = currency.upper()
     if not is_currency(currency, locale):
-        return
+        return None
     return currency
 
 
-def get_currency_name(currency, count=None, locale=LC_NUMERIC):
+def get_currency_name(
+    currency: str,
+    count: float | decimal.Decimal | None = None,
+    locale: Locale | str | None = None,
+) -> str:
     """Return the name used by the locale for the specified currency.
 
     >>> get_currency_name('USD', locale='en_US')
-    u'US Dollar'
+    'US Dollar'
 
     .. versionadded:: 0.9.4
 
@@ -121,29 +120,38 @@ def get_currency_name(currency, count=None, locale=LC_NUMERIC):
     :param count: the optional count.  If provided the currency name
                   will be pluralized to that number if possible.
     :param locale: the `Locale` object or locale identifier.
+                   Defaults to the system currency locale or numeric locale.
     """
-    loc = Locale.parse(locale)
+    loc = Locale.parse(locale or LC_MONETARY)
     if count is not None:
-        plural_form = loc.plural_form(count)
+        try:
+            plural_form = loc.plural_form(count)
+        except (OverflowError, ValueError):
+            plural_form = 'other'
         plural_names = loc._data['currency_names_plural']
         if currency in plural_names:
-            return plural_names[currency][plural_form]
+            currency_plural_names = plural_names[currency]
+            if plural_form in currency_plural_names:
+                return currency_plural_names[plural_form]
+            if 'other' in currency_plural_names:
+                return currency_plural_names['other']
     return loc.currencies.get(currency, currency)
 
 
-def get_currency_symbol(currency, locale=LC_NUMERIC):
+def get_currency_symbol(currency: str, locale: Locale | str | None = None) -> str:
     """Return the symbol used by the locale for the specified currency.
 
     >>> get_currency_symbol('USD', locale='en_US')
-    u'$'
+    '$'
 
     :param currency: the currency code.
     :param locale: the `Locale` object or locale identifier.
+                   Defaults to the system currency locale or numeric locale.
     """
-    return Locale.parse(locale).currency_symbols.get(currency, currency)
+    return Locale.parse(locale or LC_MONETARY).currency_symbols.get(currency, currency)
 
 
-def get_currency_precision(currency):
+def get_currency_precision(currency: str) -> int:
     """Return currency's precision.
 
     Precision is the number of decimals found after the decimal point in the
@@ -157,7 +165,11 @@ def get_currency_precision(currency):
     return precisions.get(currency, precisions['DEFAULT'])[0]
 
 
-def get_currency_unit_pattern(currency, count=None, locale=LC_NUMERIC):
+def get_currency_unit_pattern(
+    currency: str,  # TODO: unused?!
+    count: float | decimal.Decimal | None = None,
+    locale: Locale | str | None = None,
+) -> str:
     """
     Return the unit pattern used for long display of a currency value
     for a given locale.
@@ -166,7 +178,7 @@ def get_currency_unit_pattern(currency, count=None, locale=LC_NUMERIC):
     name should be substituted.
 
     >>> get_currency_unit_pattern('USD', locale='en_US', count=10)
-    u'{0} {1}'
+    '{0} {1}'
 
     .. versionadded:: 2.7.0
 
@@ -174,8 +186,9 @@ def get_currency_unit_pattern(currency, count=None, locale=LC_NUMERIC):
     :param count: the optional count.  If provided the unit
                   pattern for that number will be returned.
     :param locale: the `Locale` object or locale identifier.
+                   Defaults to the system currency locale or numeric locale.
     """
-    loc = Locale.parse(locale)
+    loc = Locale.parse(locale or LC_MONETARY)
     if count is not None:
         plural_form = loc.plural_form(count)
         try:
@@ -187,9 +200,36 @@ def get_currency_unit_pattern(currency, count=None, locale=LC_NUMERIC):
     return loc._data['currency_unit_patterns']['other']
 
 
-def get_territory_currencies(territory, start_date=None, end_date=None,
-                             tender=True, non_tender=False,
-                             include_details=False):
+@overload
+def get_territory_currencies(
+    territory: str,
+    start_date: datetime.date | None = ...,
+    end_date: datetime.date | None = ...,
+    tender: bool = ...,
+    non_tender: bool = ...,
+    include_details: Literal[False] = ...,
+) -> list[str]: ...  # pragma: no cover
+
+
+@overload
+def get_territory_currencies(
+    territory: str,
+    start_date: datetime.date | None = ...,
+    end_date: datetime.date | None = ...,
+    tender: bool = ...,
+    non_tender: bool = ...,
+    include_details: Literal[True] = ...,
+) -> list[dict[str, Any]]: ...  # pragma: no cover
+
+
+def get_territory_currencies(
+    territory: str,
+    start_date: datetime.date | None = None,
+    end_date: datetime.date | None = None,
+    tender: bool = True,
+    non_tender: bool = False,
+    include_details: bool = False,
+) -> list[str] | list[dict[str, Any]]:
     """Returns the list of currencies for the given territory that are valid for
     the given date range.  In addition to that the currency database
     distinguishes between tender and non-tender currencies.  By default only
@@ -241,119 +281,242 @@ def get_territory_currencies(territory, start_date=None, end_date=None,
     """
     currencies = get_global('territory_currencies')
     if start_date is None:
-        start_date = date_.today()
-    elif isinstance(start_date, datetime_):
+        start_date = datetime.date.today()
+    elif isinstance(start_date, datetime.datetime):
         start_date = start_date.date()
     if end_date is None:
         end_date = start_date
-    elif isinstance(end_date, datetime_):
+    elif isinstance(end_date, datetime.datetime):
         end_date = end_date.date()
 
     curs = currencies.get(territory.upper(), ())
     # TODO: validate that the territory exists
 
     def _is_active(start, end):
-        return (start is None or start <= end_date) and \
-               (end is None or end >= start_date)
+        return (start is None or start <= end_date) and (end is None or end >= start_date)
 
     result = []
     for currency_code, start, end, is_tender in curs:
         if start:
-            start = date_(*start)
+            start = datetime.date(*start)
         if end:
-            end = date_(*end)
-        if ((is_tender and tender) or
-                (not is_tender and non_tender)) and _is_active(start, end):
+            end = datetime.date(*end)
+        if ((is_tender and tender) or (not is_tender and non_tender)) and _is_active(
+            start,
+            end,
+        ):
             if include_details:
-                result.append({
-                    'currency': currency_code,
-                    'from': start,
-                    'to': end,
-                    'tender': is_tender,
-                })
+                result.append(
+                    {
+                        'currency': currency_code,
+                        'from': start,
+                        'to': end,
+                        'tender': is_tender,
+                    },
+                )
             else:
                 result.append(currency_code)
 
     return result
 
 
-def get_decimal_symbol(locale=LC_NUMERIC):
+def _get_numbering_system(
+    locale: Locale,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
+    if numbering_system == "default":
+        return locale.default_numbering_system
+    else:
+        return numbering_system
+
+
+def _get_number_symbols(
+    locale: Locale,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> LocaleDataDict:
+    numbering_system = _get_numbering_system(locale, numbering_system)
+    try:
+        return locale.number_symbols[numbering_system]
+    except KeyError as error:
+        raise UnsupportedNumberingSystemError(
+            f"Unknown numbering system {numbering_system} for Locale {locale}.",
+        ) from error
+
+
+class UnsupportedNumberingSystemError(Exception):
+    """Exception thrown when an unsupported numbering system is requested for the given Locale."""
+
+    pass
+
+
+def get_decimal_symbol(
+    locale: Locale | str | None = None,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
     """Return the symbol used by the locale to separate decimal fractions.
 
     >>> get_decimal_symbol('en_US')
-    u'.'
+    '.'
+    >>> get_decimal_symbol('ar_EG', numbering_system='default')
+    '٫'
+    >>> get_decimal_symbol('ar_EG', numbering_system='latn')
+    '.'
 
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
+    :param numbering_system: The numbering system used for fetching the symbol. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: If the numbering system is not supported by the locale.
     """
-    return Locale.parse(locale).number_symbols.get('decimal', u'.')
+    locale = Locale.parse(locale or LC_NUMERIC)
+    return _get_number_symbols(locale, numbering_system=numbering_system).get('decimal', '.')
 
 
-def get_plus_sign_symbol(locale=LC_NUMERIC):
+def get_plus_sign_symbol(
+    locale: Locale | str | None = None,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
     """Return the plus sign symbol used by the current locale.
 
     >>> get_plus_sign_symbol('en_US')
-    u'+'
+    '+'
+    >>> get_plus_sign_symbol('ar_EG', numbering_system='default')
+    '\\u061c+'
+    >>> get_plus_sign_symbol('ar_EG', numbering_system='latn')
+    '\\u200e+'
 
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
+    :param numbering_system: The numbering system used for fetching the symbol. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: if the numbering system is not supported by the locale.
     """
-    return Locale.parse(locale).number_symbols.get('plusSign', u'+')
+    locale = Locale.parse(locale or LC_NUMERIC)
+    return _get_number_symbols(locale, numbering_system=numbering_system).get('plusSign', '+')
 
 
-def get_minus_sign_symbol(locale=LC_NUMERIC):
+def get_minus_sign_symbol(
+    locale: Locale | str | None = None,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
     """Return the plus sign symbol used by the current locale.
 
     >>> get_minus_sign_symbol('en_US')
-    u'-'
+    '-'
+    >>> get_minus_sign_symbol('ar_EG', numbering_system='default')
+    '\\u061c-'
+    >>> get_minus_sign_symbol('ar_EG', numbering_system='latn')
+    '\\u200e-'
 
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
+    :param numbering_system: The numbering system used for fetching the symbol. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: if the numbering system is not supported by the locale.
     """
-    return Locale.parse(locale).number_symbols.get('minusSign', u'-')
+    locale = Locale.parse(locale or LC_NUMERIC)
+    return _get_number_symbols(locale, numbering_system=numbering_system).get('minusSign', '-')
 
 
-def get_exponential_symbol(locale=LC_NUMERIC):
+def get_exponential_symbol(
+    locale: Locale | str | None = None,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
     """Return the symbol used by the locale to separate mantissa and exponent.
 
     >>> get_exponential_symbol('en_US')
-    u'E'
+    'E'
+    >>> get_exponential_symbol('ar_EG', numbering_system='default')
+    'أس'
+    >>> get_exponential_symbol('ar_EG', numbering_system='latn')
+    'E'
 
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
+    :param numbering_system: The numbering system used for fetching the symbol. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: if the numbering system is not supported by the locale.
     """
-    return Locale.parse(locale).number_symbols.get('exponential', u'E')
+    locale = Locale.parse(locale or LC_NUMERIC)
+    return _get_number_symbols(locale, numbering_system=numbering_system).get('exponential', 'E')  # fmt: skip
 
 
-def get_group_symbol(locale=LC_NUMERIC):
+def get_group_symbol(
+    locale: Locale | str | None = None,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
     """Return the symbol used by the locale to separate groups of thousands.
 
     >>> get_group_symbol('en_US')
-    u','
+    ','
+    >>> get_group_symbol('ar_EG', numbering_system='default')
+    '٬'
+    >>> get_group_symbol('ar_EG', numbering_system='latn')
+    ','
 
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
+    :param numbering_system: The numbering system used for fetching the symbol. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: if the numbering system is not supported by the locale.
     """
-    return Locale.parse(locale).number_symbols.get('group', u',')
+    locale = Locale.parse(locale or LC_NUMERIC)
+    return _get_number_symbols(locale, numbering_system=numbering_system).get('group', ',')
 
 
-def format_number(number, locale=LC_NUMERIC):
-    u"""Return the given number formatted for a specific locale.
+def get_infinity_symbol(
+    locale: Locale | str | None = None,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
+    """Return the symbol used by the locale to represent infinity.
 
-    >>> format_number(1099, locale='en_US')
-    u'1,099'
-    >>> format_number(1099, locale='de_DE')
-    u'1.099'
+    >>> get_infinity_symbol('en_US')
+    '∞'
+    >>> get_infinity_symbol('ar_EG', numbering_system='default')
+    '∞'
+    >>> get_infinity_symbol('ar_EG', numbering_system='latn')
+    '∞'
+
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
+    :param numbering_system: The numbering system used for fetching the symbol. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: if the numbering system is not supported by the locale.
+    """
+    locale = Locale.parse(locale or LC_NUMERIC)
+    return _get_number_symbols(locale, numbering_system=numbering_system).get('infinity', '∞')
+
+
+def format_number(
+    number: float | decimal.Decimal | str,
+    locale: Locale | str | None = None,
+) -> str:
+    """Return the given number formatted for a specific locale.
+
+    >>> format_number(1099, locale='en_US')  # doctest: +SKIP
+    '1,099'
+    >>> format_number(1099, locale='de_DE')  # doctest: +SKIP
+    '1.099'
 
     .. deprecated:: 2.6.0
 
        Use babel.numbers.format_decimal() instead.
 
     :param number: the number to format
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
 
 
     """
-    warnings.warn('Use babel.numbers.format_decimal() instead.', DeprecationWarning)
+    warnings.warn(
+        'Use babel.numbers.format_decimal() instead.',
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return format_decimal(number, locale=locale)
 
 
-def get_decimal_precision(number):
+def get_decimal_precision(number: decimal.Decimal) -> int:
     """Return maximum precision of a decimal instance's fractional part.
 
     Precision is extracted from the fractional part only.
@@ -361,65 +524,186 @@ def get_decimal_precision(number):
     # Copied from: https://github.com/mahmoud/boltons/pull/59
     assert isinstance(number, decimal.Decimal)
     decimal_tuple = number.normalize().as_tuple()
-    if decimal_tuple.exponent >= 0:
+    # Note: DecimalTuple.exponent can be 'n' (qNaN), 'N' (sNaN), or 'F' (Infinity)
+    if not isinstance(decimal_tuple.exponent, int) or decimal_tuple.exponent >= 0:
         return 0
     return abs(decimal_tuple.exponent)
 
 
-def get_decimal_quantum(precision):
+def get_decimal_quantum(precision: int | decimal.Decimal) -> decimal.Decimal:
     """Return minimal quantum of a number, as defined by precision."""
-    assert isinstance(precision, (int, long, decimal.Decimal))
+    assert isinstance(precision, (int, decimal.Decimal))
     return decimal.Decimal(10) ** (-precision)
 
 
 def format_decimal(
-        number, format=None, locale=LC_NUMERIC, decimal_quantization=True, group_separator=True):
-    u"""Return the given decimal number formatted for a specific locale.
+    number: float | decimal.Decimal | str,
+    format: str | NumberPattern | None = None,
+    locale: Locale | str | None = None,
+    decimal_quantization: bool = True,
+    group_separator: bool = True,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
+    """Return the given decimal number formatted for a specific locale.
 
     >>> format_decimal(1.2345, locale='en_US')
-    u'1.234'
+    '1.234'
     >>> format_decimal(1.2346, locale='en_US')
-    u'1.235'
+    '1.235'
     >>> format_decimal(-1.2346, locale='en_US')
-    u'-1.235'
+    '-1.235'
     >>> format_decimal(1.2345, locale='sv_SE')
-    u'1,234'
+    '1,234'
     >>> format_decimal(1.2345, locale='de')
-    u'1,234'
+    '1,234'
+    >>> format_decimal(1.2345, locale='ar_EG', numbering_system='default')
+    '1٫234'
+    >>> format_decimal(1.2345, locale='ar_EG', numbering_system='latn')
+    '1.234'
 
     The appropriate thousands grouping and the decimal separator are used for
     each locale:
 
     >>> format_decimal(12345.5, locale='en_US')
-    u'12,345.5'
+    '12,345.5'
 
     By default the locale is allowed to truncate and round a high-precision
     number by forcing its format pattern onto the decimal part. You can bypass
     this behavior with the `decimal_quantization` parameter:
 
     >>> format_decimal(1.2346, locale='en_US')
-    u'1.235'
+    '1.235'
     >>> format_decimal(1.2346, locale='en_US', decimal_quantization=False)
-    u'1.2346'
+    '1.2346'
     >>> format_decimal(12345.67, locale='fr_CA', group_separator=False)
-    u'12345,67'
+    '12345,67'
     >>> format_decimal(12345.67, locale='en_US', group_separator=True)
-    u'12,345.67'
+    '12,345.67'
 
     :param number: the number to format
     :param format:
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
     :param decimal_quantization: Truncate and round high-precision numbers to
                                  the format pattern. Defaults to `True`.
     :param group_separator: Boolean to switch group separator on/off in a locale's
                             number format.
+    :param numbering_system: The numbering system used for formatting number symbols. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: If the numbering system is not supported by the locale.
     """
-    locale = Locale.parse(locale)
-    if not format:
-        format = locale.decimal_formats.get(format)
+    locale = Locale.parse(locale or LC_NUMERIC)
+    if format is None:
+        format = locale.decimal_formats[format]
     pattern = parse_pattern(format)
     return pattern.apply(
-        number, locale, decimal_quantization=decimal_quantization, group_separator=group_separator)
+        number,
+        locale,
+        decimal_quantization=decimal_quantization,
+        group_separator=group_separator,
+        numbering_system=numbering_system,
+    )
+
+
+def format_compact_decimal(
+    number: float | decimal.Decimal | str,
+    *,
+    format_type: Literal["short", "long"] = "short",
+    locale: Locale | str | None = None,
+    fraction_digits: int = 0,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
+    """Return the given decimal number formatted for a specific locale in compact form.
+
+    >>> format_compact_decimal(12345, format_type="short", locale='en_US')
+    '12K'
+    >>> format_compact_decimal(12345, format_type="long", locale='en_US')
+    '12 thousand'
+    >>> format_compact_decimal(12345, format_type="short", locale='en_US', fraction_digits=2)
+    '12.34K'
+    >>> format_compact_decimal(1234567, format_type="short", locale="ja_JP")
+    '123万'
+    >>> format_compact_decimal(2345678, format_type="long", locale="mk")
+    '2 милиони'
+    >>> format_compact_decimal(21000000, format_type="long", locale="mk")
+    '21 милион'
+    >>> format_compact_decimal(12345, format_type="short", locale='ar_EG', fraction_digits=2, numbering_system='default')
+    '12٫34\\xa0ألف'
+
+    :param number: the number to format
+    :param format_type: Compact format to use ("short" or "long")
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
+    :param fraction_digits: Number of digits after the decimal point to use. Defaults to `0`.
+    :param numbering_system: The numbering system used for formatting number symbols. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: If the numbering system is not supported by the locale.
+    """
+    locale = Locale.parse(locale or LC_NUMERIC)
+    compact_format = locale.compact_decimal_formats[format_type]
+    number, format = _get_compact_format(number, compact_format, locale, fraction_digits)
+    # Did not find a format, fall back.
+    if format is None:
+        format = locale.decimal_formats[None]
+    pattern = parse_pattern(format)
+    return pattern.apply(
+        number,
+        locale,
+        decimal_quantization=False,
+        numbering_system=numbering_system,
+    )
+
+
+def _get_compact_format(
+    number: float | decimal.Decimal | str,
+    compact_format: LocaleDataDict,
+    locale: Locale,
+    fraction_digits: int,
+) -> tuple[decimal.Decimal, NumberPattern | None]:
+    """Returns the number after dividing by the unit and the format pattern to use.
+    The algorithm is described here:
+    https://www.unicode.org/reports/tr35/tr35-45/tr35-numbers.html#Compact_Number_Formats.
+    """
+    if not isinstance(number, decimal.Decimal):
+        number = decimal.Decimal(str(number))
+    if number.is_nan() or number.is_infinite():
+        return number, None
+    format = None
+    magnitudes = sorted([int(m) for m in compact_format["other"]], reverse=True)
+    abs_number = abs(number)
+    for index, magnitude in enumerate(magnitudes):
+        if abs_number < magnitude:
+            continue
+        # check the pattern using "other" as the amount
+        format = compact_format["other"][str(magnitude)]
+        pattern = parse_pattern(format).pattern
+        # if the pattern is "0", we do not divide the number
+        if pattern == "0":
+            break
+        # otherwise, we need to divide the number by the magnitude but remove zeros
+        # equal to the number of 0's in the pattern minus 1
+        divisor = magnitude // (10 ** (pattern.count("0") - 1))
+        scaled = cast(decimal.Decimal, number / divisor)
+        # round to the number of fraction digits requested
+        rounded = round(scaled, fraction_digits)
+        # Rounding can carry the value up into the next magnitude, e.g.
+        # 999_999 would otherwise render as "1000K". The CLDR algorithm
+        # selects the pattern from the rounded value, so redo the lookup
+        # one magnitude up to get "1M" instead.
+        if index > 0 and abs(rounded) * divisor >= magnitudes[index - 1]:
+            bumped = decimal.Decimal(magnitudes[index - 1]).copy_sign(number)
+            return _get_compact_format(bumped, compact_format, locale, fraction_digits)
+        # if the remaining number is singular, use the singular format
+        plural_form = locale.plural_form(abs(scaled))
+        if plural_form not in compact_format:
+            plural_form = "other"
+        if scaled == 1 and "1" in compact_format:
+            plural_form = "1"
+        if str(magnitude) not in compact_format[plural_form]:
+            plural_form = "other"  # fall back to other as the implicit default
+        format = compact_format[plural_form][str(magnitude)]
+        number = rounded
+        break
+    return number, format
 
 
 class UnknownCurrencyFormatError(KeyError):
@@ -427,48 +711,59 @@ class UnknownCurrencyFormatError(KeyError):
 
 
 def format_currency(
-        number, currency, format=None, locale=LC_NUMERIC, currency_digits=True,
-        format_type='standard', decimal_quantization=True, group_separator=True):
-    u"""Return formatted currency value.
+    number: float | decimal.Decimal | str,
+    currency: str,
+    format: str | NumberPattern | None = None,
+    locale: Locale | str | None = None,
+    currency_digits: bool = True,
+    format_type: Literal["name", "standard", "accounting"] = "standard",
+    decimal_quantization: bool = True,
+    group_separator: bool = True,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
+    """Return formatted currency value.
 
     >>> format_currency(1099.98, 'USD', locale='en_US')
-    u'$1,099.98'
+    '$1,099.98'
     >>> format_currency(1099.98, 'USD', locale='es_CO')
-    u'US$\\xa01.099,98'
+    'US$1.099,98'
     >>> format_currency(1099.98, 'EUR', locale='de_DE')
-    u'1.099,98\\xa0\\u20ac'
+    '1.099,98\\xa0\\u20ac'
+    >>> format_currency(1099.98, 'EGP', locale='ar_EG', numbering_system='default')
+    '\\u200f1٬099٫98\\xa0ج.م.\\u200f'
 
     The format can also be specified explicitly.  The currency is
     placed with the '¤' sign.  As the sign gets repeated the format
     expands (¤ being the symbol, ¤¤ is the currency abbreviation and
     ¤¤¤ is the full name of the currency):
 
-    >>> format_currency(1099.98, 'EUR', u'\xa4\xa4 #,##0.00', locale='en_US')
-    u'EUR 1,099.98'
-    >>> format_currency(1099.98, 'EUR', u'#,##0.00 \xa4\xa4\xa4', locale='en_US')
-    u'1,099.98 euros'
+    >>> format_currency(1099.98, 'EUR', '\\xa4\\xa4 #,##0.00', locale='en_US')
+    'EUR 1,099.98'
+    >>> format_currency(1099.98, 'EUR', '#,##0.00 \\xa4\\xa4\\xa4', locale='en_US')
+    '1,099.98 euros'
 
     Currencies usually have a specific number of decimal digits. This function
     favours that information over the given format:
 
     >>> format_currency(1099.98, 'JPY', locale='en_US')
-    u'\\xa51,100'
-    >>> format_currency(1099.98, 'COP', u'#,##0.00', locale='es_ES')
-    u'1.099,98'
+    '\\xa51,100'
+    >>> format_currency(1099.98, 'COP', '#,##0.00', locale='es_ES')
+    '1.100'
 
-    However, the number of decimal digits can be overriden from the currency
+    However, the number of decimal digits can be overridden from the currency
     information, by setting the last parameter to ``False``:
 
     >>> format_currency(1099.98, 'JPY', locale='en_US', currency_digits=False)
-    u'\\xa51,099.98'
-    >>> format_currency(1099.98, 'COP', u'#,##0.00', locale='es_ES', currency_digits=False)
-    u'1.099,98'
+    '\\xa51,099.98'
+    >>> format_currency(1099.98, 'COP', '#,##0.00', locale='es_ES', currency_digits=False)
+    '1.099,98'
 
     If a format is not specified the type of currency format to use
     from the locale can be specified:
 
     >>> format_currency(1099.98, 'EUR', locale='en_US', format_type='standard')
-    u'\\u20ac1,099.98'
+    '\\u20ac1,099.98'
 
     When the given currency format type is not available, an exception is
     raised:
@@ -479,48 +774,60 @@ def format_currency(
     UnknownCurrencyFormatError: "'unknown' is not a known currency format type"
 
     >>> format_currency(101299.98, 'USD', locale='en_US', group_separator=False)
-    u'$101299.98'
+    '$101299.98'
 
     >>> format_currency(101299.98, 'USD', locale='en_US', group_separator=True)
-    u'$101,299.98'
+    '$101,299.98'
 
     You can also pass format_type='name' to use long display names. The order of
     the number and currency name, along with the correct localized plural form
     of the currency name, is chosen according to locale:
 
     >>> format_currency(1, 'USD', locale='en_US', format_type='name')
-    u'1.00 US dollar'
+    '1.00 US dollar'
     >>> format_currency(1099.98, 'USD', locale='en_US', format_type='name')
-    u'1,099.98 US dollars'
-    >>> format_currency(1099.98, 'USD', locale='ee', format_type='name')
-    u'us ga dollar 1,099.98'
+    '1,099.98 US dollars'
+    >>> format_currency(1099.98, 'USD', locale='my', format_type='name')
+    'အမေရိကန် ဒေါ်လာ 1,099.98'
 
     By default the locale is allowed to truncate and round a high-precision
     number by forcing its format pattern onto the decimal part. You can bypass
     this behavior with the `decimal_quantization` parameter:
 
     >>> format_currency(1099.9876, 'USD', locale='en_US')
-    u'$1,099.99'
+    '$1,099.99'
     >>> format_currency(1099.9876, 'USD', locale='en_US', decimal_quantization=False)
-    u'$1,099.9876'
+    '$1,099.9876'
 
     :param number: the number to format
     :param currency: the currency code
     :param format: the format string to use
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier.
+                   Defaults to the system currency locale or numeric locale.
     :param currency_digits: use the currency's natural number of decimal digits
     :param format_type: the currency format type to use
     :param decimal_quantization: Truncate and round high-precision numbers to
                                  the format pattern. Defaults to `True`.
     :param group_separator: Boolean to switch group separator on/off in a locale's
                             number format.
-
+    :param numbering_system: The numbering system used for formatting number symbols. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: If the numbering system is not supported by the locale.
     """
+    locale = Locale.parse(locale or LC_MONETARY)
+
     if format_type == 'name':
-        return _format_currency_long_name(number, currency, format=format,
-                                          locale=locale, currency_digits=currency_digits,
-                                          decimal_quantization=decimal_quantization, group_separator=group_separator)
-    locale = Locale.parse(locale)
+        return _format_currency_long_name(
+            number,
+            currency,
+            locale=locale,
+            format=format,
+            currency_digits=currency_digits,
+            decimal_quantization=decimal_quantization,
+            group_separator=group_separator,
+            numbering_system=numbering_system,
+        )
+
     if format:
         pattern = parse_pattern(format)
     else:
@@ -528,29 +835,41 @@ def format_currency(
             pattern = locale.currency_formats[format_type]
         except KeyError:
             raise UnknownCurrencyFormatError(
-                "%r is not a known currency format type" % format_type)
+                f"{format_type!r} is not a known currency format type",
+            ) from None
 
     return pattern.apply(
-        number, locale, currency=currency, currency_digits=currency_digits,
-        decimal_quantization=decimal_quantization, group_separator=group_separator)
+        number,
+        locale,
+        currency=currency,
+        currency_digits=currency_digits,
+        decimal_quantization=decimal_quantization,
+        group_separator=group_separator,
+        numbering_system=numbering_system,
+    )
 
 
 def _format_currency_long_name(
-        number, currency, format=None, locale=LC_NUMERIC, currency_digits=True,
-        format_type='standard', decimal_quantization=True, group_separator=True):
+    number: float | decimal.Decimal | str,
+    currency: str,
+    *,
+    locale: Locale,
+    format: str | NumberPattern | None,
+    currency_digits: bool,
+    decimal_quantization: bool,
+    group_separator: bool,
+    numbering_system: Literal["default"] | str,
+) -> str:
     # Algorithm described here:
     # https://www.unicode.org/reports/tr35/tr35-numbers.html#Currencies
-    locale = Locale.parse(locale)
+
     # Step 1.
     # There are no examples of items with explicit count (0 or 1) in current
     # locale data. So there is no point implementing that.
     # Step 2.
 
     # Correct number to numeric type, important for looking up plural rules:
-    if isinstance(number, str):
-        number_n = float(number)
-    else:
-        number_n = number
+    number_n = float(number) if isinstance(number, str) else number
 
     # Step 3.
     unit_pattern = get_currency_unit_pattern(currency, count=number_n, locale=locale)
@@ -560,109 +879,222 @@ def _format_currency_long_name(
 
     # Step 5.
     if not format:
-        format = locale.decimal_formats.get(format)
+        format = locale.decimal_formats[None]
 
     pattern = parse_pattern(format)
 
     number_part = pattern.apply(
-        number, locale, currency=currency, currency_digits=currency_digits,
-        decimal_quantization=decimal_quantization, group_separator=group_separator)
+        number,
+        locale,
+        currency=currency,
+        currency_digits=currency_digits,
+        decimal_quantization=decimal_quantization,
+        group_separator=group_separator,
+        numbering_system=numbering_system,
+    )
 
     return unit_pattern.format(number_part, display_name)
 
 
+def format_compact_currency(
+    number: float | decimal.Decimal | str,
+    currency: str,
+    *,
+    format_type: Literal["short"] = "short",
+    locale: Locale | str | None = None,
+    fraction_digits: int = 0,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
+    """Format a number as a currency value in compact form.
+
+    >>> format_compact_currency(12345, 'USD', locale='en_US')
+    '$12K'
+    >>> format_compact_currency(123456789, 'USD', locale='en_US', fraction_digits=2)
+    '$123.46M'
+    >>> format_compact_currency(123456789, 'EUR', locale='de_DE', fraction_digits=1)
+    '123,5\\xa0Mio.\\xa0€'
+
+    :param number: the number to format
+    :param currency: the currency code
+    :param format_type: the compact format type to use. Defaults to "short".
+    :param locale: the `Locale` object or locale identifier.
+                   Defaults to the system currency locale or numeric locale.
+    :param fraction_digits: Number of digits after the decimal point to use. Defaults to `0`.
+    :param numbering_system: The numbering system used for formatting number symbols. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: If the numbering system is not supported by the locale.
+    """
+    locale = Locale.parse(locale or LC_MONETARY)
+    try:
+        compact_format = locale.compact_currency_formats[format_type]
+    except KeyError as error:
+        raise UnknownCurrencyFormatError(
+            f"{format_type!r} is not a known compact currency format type",
+        ) from error
+    number, format = _get_compact_format(number, compact_format, locale, fraction_digits)
+    # Did not find a format, fall back.
+    if format is None or "¤" not in str(format):
+        # find first format that has a currency symbol
+        for magnitude in compact_format['other']:
+            format = compact_format['other'][magnitude].pattern
+            if '¤' not in format:
+                continue
+            # remove characters that are not the currency symbol, 0's or spaces
+            format = re.sub(r'[^0\s\¤]', '', format)
+            # compress adjacent spaces into one
+            format = re.sub(r'(\s)\s+', r'\1', format).strip()
+            break
+    if format is None:
+        raise ValueError('No compact currency format found for the given number and locale.')
+    pattern = parse_pattern(format)
+    return pattern.apply(
+        number,
+        locale,
+        currency=currency,
+        currency_digits=False,
+        decimal_quantization=False,
+        numbering_system=numbering_system,
+    )
+
+
 def format_percent(
-        number, format=None, locale=LC_NUMERIC, decimal_quantization=True, group_separator=True):
+    number: float | decimal.Decimal | str,
+    format: str | NumberPattern | None = None,
+    locale: Locale | str | None = None,
+    decimal_quantization: bool = True,
+    group_separator: bool = True,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
     """Return formatted percent value for a specific locale.
 
     >>> format_percent(0.34, locale='en_US')
-    u'34%'
+    '34%'
     >>> format_percent(25.1234, locale='en_US')
-    u'2,512%'
+    '2,512%'
     >>> format_percent(25.1234, locale='sv_SE')
-    u'2\\xa0512\\xa0%'
+    '2\\xa0512\\xa0%'
+    >>> format_percent(25.1234, locale='ar_EG', numbering_system='default')
+    '2٬512%'
 
     The format pattern can also be specified explicitly:
 
-    >>> format_percent(25.1234, u'#,##0\u2030', locale='en_US')
-    u'25,123\u2030'
+    >>> format_percent(25.1234, '#,##0\\u2030', locale='en_US')
+    '25,123‰'
 
     By default the locale is allowed to truncate and round a high-precision
     number by forcing its format pattern onto the decimal part. You can bypass
     this behavior with the `decimal_quantization` parameter:
 
     >>> format_percent(23.9876, locale='en_US')
-    u'2,399%'
+    '2,399%'
     >>> format_percent(23.9876, locale='en_US', decimal_quantization=False)
-    u'2,398.76%'
+    '2,398.76%'
 
     >>> format_percent(229291.1234, locale='pt_BR', group_separator=False)
-    u'22929112%'
+    '22929112%'
 
     >>> format_percent(229291.1234, locale='pt_BR', group_separator=True)
-    u'22.929.112%'
+    '22.929.112%'
 
     :param number: the percent number to format
     :param format:
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
     :param decimal_quantization: Truncate and round high-precision numbers to
                                  the format pattern. Defaults to `True`.
     :param group_separator: Boolean to switch group separator on/off in a locale's
                             number format.
+    :param numbering_system: The numbering system used for formatting number symbols. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: If the numbering system is not supported by the locale.
     """
-    locale = Locale.parse(locale)
+    locale = Locale.parse(locale or LC_NUMERIC)
     if not format:
-        format = locale.percent_formats.get(format)
+        format = locale.percent_formats[None]
     pattern = parse_pattern(format)
     return pattern.apply(
-        number, locale, decimal_quantization=decimal_quantization, group_separator=group_separator)
+        number,
+        locale,
+        decimal_quantization=decimal_quantization,
+        group_separator=group_separator,
+        numbering_system=numbering_system,
+    )
 
 
 def format_scientific(
-        number, format=None, locale=LC_NUMERIC, decimal_quantization=True):
+    number: float | decimal.Decimal | str,
+    format: str | NumberPattern | None = None,
+    locale: Locale | str | None = None,
+    decimal_quantization: bool = True,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
     """Return value formatted in scientific notation for a specific locale.
 
     >>> format_scientific(10000, locale='en_US')
-    u'1E4'
+    '1E4'
+    >>> format_scientific(10000, locale='ar_EG', numbering_system='default')
+    '1أس4'
 
     The format pattern can also be specified explicitly:
 
-    >>> format_scientific(1234567, u'##0.##E00', locale='en_US')
-    u'1.23E06'
+    >>> format_scientific(1234567, '##0.##E00', locale='en_US')
+    '1.23E06'
 
     By default the locale is allowed to truncate and round a high-precision
     number by forcing its format pattern onto the decimal part. You can bypass
     this behavior with the `decimal_quantization` parameter:
 
-    >>> format_scientific(1234.9876, u'#.##E0', locale='en_US')
-    u'1.23E3'
-    >>> format_scientific(1234.9876, u'#.##E0', locale='en_US', decimal_quantization=False)
-    u'1.2349876E3'
+    >>> format_scientific(1234.9876, '#.##E0', locale='en_US')
+    '1.23E3'
+    >>> format_scientific(1234.9876, '#.##E0', locale='en_US', decimal_quantization=False)
+    '1.2349876E3'
 
     :param number: the number to format
     :param format:
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
     :param decimal_quantization: Truncate and round high-precision numbers to
                                  the format pattern. Defaults to `True`.
+    :param numbering_system: The numbering system used for formatting number symbols. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: If the numbering system is not supported by the locale.
     """
-    locale = Locale.parse(locale)
+    locale = Locale.parse(locale or LC_NUMERIC)
     if not format:
-        format = locale.scientific_formats.get(format)
+        format = locale.scientific_formats[None]
     pattern = parse_pattern(format)
     return pattern.apply(
-        number, locale, decimal_quantization=decimal_quantization)
+        number,
+        locale,
+        decimal_quantization=decimal_quantization,
+        numbering_system=numbering_system,
+    )
 
 
 class NumberFormatError(ValueError):
     """Exception raised when a string cannot be parsed into a number."""
 
-    def __init__(self, message, suggestions=None):
-        super(NumberFormatError, self).__init__(message)
+    def __init__(self, message: str, suggestions: list[str] | None = None) -> None:
+        super().__init__(message)
         #: a list of properly formatted numbers derived from the invalid input
         self.suggestions = suggestions
 
 
-def parse_number(string, locale=LC_NUMERIC):
+SPACE_CHARS = {
+    ' ',  # space
+    '\xa0',  # no-break space
+    '\u202f',  # narrow no-break space
+}
+
+SPACE_CHARS_RE = re.compile('|'.join(SPACE_CHARS))
+
+
+def parse_number(
+    string: str,
+    locale: Locale | str | None = None,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> int:
     """Parse localized number string into an integer.
 
     >>> parse_number('1,099', locale='en_US')
@@ -678,17 +1110,39 @@ def parse_number(string, locale=LC_NUMERIC):
     NumberFormatError: '1.099,98' is not a valid number
 
     :param string: the string to parse
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
+    :param numbering_system: The numbering system used for formatting number symbols. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
     :return: the parsed number
     :raise `NumberFormatError`: if the string can not be converted to a number
+    :raise `UnsupportedNumberingSystemError`: if the numbering system is not supported by the locale.
     """
+    group_symbol = get_group_symbol(locale, numbering_system=numbering_system)
+
+    if (
+        # if the grouping symbol is a kind of space,
+        group_symbol in SPACE_CHARS
+        # and the string to be parsed does not contain it,
+        and group_symbol not in string
+        # but it does contain any other kind of space instead,
+        and SPACE_CHARS_RE.search(string)
+    ):
+        # ... it's reasonable to assume it is taking the place of the grouping symbol.
+        string = SPACE_CHARS_RE.sub(group_symbol, string)
+
     try:
-        return int(string.replace(get_group_symbol(locale), ''))
-    except ValueError:
-        raise NumberFormatError('%r is not a valid number' % string)
+        return int(string.replace(group_symbol, ''))
+    except ValueError as ve:
+        raise NumberFormatError(f"{string!r} is not a valid number") from ve
 
 
-def parse_decimal(string, locale=LC_NUMERIC, strict=False):
+def parse_decimal(
+    string: str,
+    locale: Locale | str | None = None,
+    strict: bool = False,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> decimal.Decimal:
     """Parse localized decimal string into a decimal.
 
     >>> parse_decimal('1,099.98', locale='en_US')
@@ -697,6 +1151,8 @@ def parse_decimal(string, locale=LC_NUMERIC, strict=False):
     Decimal('1099.98')
     >>> parse_decimal('12 345,123', locale='ru')
     Decimal('12345.123')
+    >>> parse_decimal('1٬099٫98', locale='ar_EG', numbering_system='default')
+    Decimal('1099.98')
 
     When the given string cannot be parsed, an exception is raised:
 
@@ -719,67 +1175,112 @@ def parse_decimal(string, locale=LC_NUMERIC, strict=False):
     NumberFormatError: '0.00' is not a properly formatted decimal number. Did you mean '0'?
 
     :param string: the string to parse
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
     :param strict: controls whether numbers formatted in a weird way are
                    accepted or rejected
+    :param numbering_system: The numbering system used for formatting number symbols. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
     :raise NumberFormatError: if the string can not be converted to a
                               decimal number
+    :raise UnsupportedNumberingSystemError: if the numbering system is not supported by the locale.
     """
-    locale = Locale.parse(locale)
-    group_symbol = get_group_symbol(locale)
-    decimal_symbol = get_decimal_symbol(locale)
+    locale = Locale.parse(locale or LC_NUMERIC)
+    group_symbol = get_group_symbol(locale, numbering_system=numbering_system)
+    decimal_symbol = get_decimal_symbol(locale, numbering_system=numbering_system)
 
     if not strict and (
-        group_symbol == u'\xa0' and  # if the grouping symbol is U+00A0 NO-BREAK SPACE,
-        group_symbol not in string and  # and the string to be parsed does not contain it,
-        ' ' in string  # but it does contain a space instead,
+        group_symbol in SPACE_CHARS  # if the grouping symbol is a kind of space,
+        and group_symbol not in string  # and the string to be parsed does not contain it,
+        # but it does contain any other kind of space instead,
+        and SPACE_CHARS_RE.search(string)
     ):
         # ... it's reasonable to assume it is taking the place of the grouping symbol.
-        string = string.replace(' ', group_symbol)
+        string = SPACE_CHARS_RE.sub(group_symbol, string)
 
     try:
-        parsed = decimal.Decimal(string.replace(group_symbol, '')
-                                       .replace(decimal_symbol, '.'))
-    except decimal.InvalidOperation:
-        raise NumberFormatError('%r is not a valid decimal number' % string)
+        parsed = decimal.Decimal(string.replace(group_symbol, '').replace(decimal_symbol, '.'))
+    except decimal.InvalidOperation as exc:
+        raise NumberFormatError(f"{string!r} is not a valid decimal number") from exc
     if strict and group_symbol in string:
-        proper = format_decimal(parsed, locale=locale, decimal_quantization=False)
-        if string != proper and string.rstrip('0') != (proper + decimal_symbol):
+        proper = format_decimal(
+            parsed,
+            locale=locale,
+            decimal_quantization=False,
+            numbering_system=numbering_system,
+        )
+        if string != proper and proper != _remove_trailing_zeros_after_decimal(string, decimal_symbol):  # fmt: skip
             try:
-                parsed_alt = decimal.Decimal(string.replace(decimal_symbol, '')
-                                                   .replace(group_symbol, '.'))
-            except decimal.InvalidOperation:
-                raise NumberFormatError((
-                    "%r is not a properly formatted decimal number. Did you mean %r?" %
-                    (string, proper)
-                ), suggestions=[proper])
+                parsed_alt = decimal.Decimal(
+                    string.replace(decimal_symbol, '').replace(group_symbol, '.'),
+                )
+            except decimal.InvalidOperation as exc:
+                raise NumberFormatError(
+                    f"{string!r} is not a properly formatted decimal number. "
+                    f"Did you mean {proper!r}?",
+                    suggestions=[proper],
+                ) from exc
             else:
-                proper_alt = format_decimal(parsed_alt, locale=locale, decimal_quantization=False)
+                proper_alt = format_decimal(
+                    parsed_alt,
+                    locale=locale,
+                    decimal_quantization=False,
+                    numbering_system=numbering_system,
+                )
                 if proper_alt == proper:
-                    raise NumberFormatError((
-                            "%r is not a properly formatted decimal number. Did you mean %r?" %
-                            (string, proper)
-                    ), suggestions=[proper])
+                    raise NumberFormatError(
+                        f"{string!r} is not a properly formatted decimal number. "
+                        f"Did you mean {proper!r}?",
+                        suggestions=[proper],
+                    )
                 else:
-                    raise NumberFormatError((
-                        "%r is not a properly formatted decimal number. Did you mean %r? Or maybe %r?" %
-                        (string, proper, proper_alt)
-                    ), suggestions=[proper, proper_alt])
+                    raise NumberFormatError(
+                        f"{string!r} is not a properly formatted decimal number. "
+                        f"Did you mean {proper!r}? Or maybe {proper_alt!r}?",
+                        suggestions=[proper, proper_alt],
+                    )
     return parsed
 
 
-PREFIX_END = r'[^0-9@#.,]'
-NUMBER_TOKEN = r'[0-9@#.,E+]'
+def _remove_trailing_zeros_after_decimal(string: str, decimal_symbol: str) -> str:
+    """
+    Remove trailing zeros from the decimal part of a numeric string.
 
-PREFIX_PATTERN = r"(?P<prefix>(?:'[^']*'|%s)*)" % PREFIX_END
-NUMBER_PATTERN = r"(?P<number>%s*)" % NUMBER_TOKEN
-SUFFIX_PATTERN = r"(?P<suffix>.*)"
+    This function takes a string representing a numeric value and a decimal symbol.
+    It removes any trailing zeros that appear after the decimal symbol in the number.
+    If the decimal part becomes empty after removing trailing zeros, the decimal symbol
+    is also removed. If the string does not contain the decimal symbol, it is returned unchanged.
 
-number_re = re.compile(r"%s%s%s" % (PREFIX_PATTERN, NUMBER_PATTERN,
-                                    SUFFIX_PATTERN))
+    :param string: The numeric string from which to remove trailing zeros.
+    :param decimal_symbol: The symbol used to denote the decimal point.
+    :return: The numeric string with trailing zeros removed from its decimal part.
+
+    Example:
+    >>> _remove_trailing_zeros_after_decimal("123.4500", ".")
+    '123.45'
+    >>> _remove_trailing_zeros_after_decimal("100.000", ".")
+    '100'
+    >>> _remove_trailing_zeros_after_decimal("100", ".")
+    '100'
+    """
+    integer_part, _, decimal_part = string.partition(decimal_symbol)
+
+    if decimal_part:
+        decimal_part = decimal_part.rstrip("0")
+        if decimal_part:
+            return integer_part + decimal_symbol + decimal_part
+        return integer_part
+
+    return string
 
 
-def parse_grouping(p):
+_number_pattern_re = re.compile(
+    r"(?P<prefix>(?:[^'0-9@#.,]|'[^']*')*)"
+    r"(?P<number>[0-9@#.,E+]*)"
+    r"(?P<suffix>.*)",
+)
+
+
+def parse_grouping(p: str) -> tuple[int, int]:
     """Parse primary and secondary digit grouping
 
     >>> parse_grouping('##')
@@ -794,22 +1295,22 @@ def parse_grouping(p):
     if g1 == -1:
         return 1000, 1000
     g1 = width - g1 - 1
-    g2 = p[:-g1 - 1].rfind(',')
+    g2 = p[: -g1 - 1].rfind(',')
     if g2 == -1:
         return g1, g1
     g2 = width - g1 - g2 - 2
     return g1, g2
 
 
-def parse_pattern(pattern):
+def parse_pattern(pattern: NumberPattern | str) -> NumberPattern:
     """Parse number format patterns"""
     if isinstance(pattern, NumberPattern):
         return pattern
 
     def _match_number(pattern):
-        rv = number_re.search(pattern)
+        rv = _number_pattern_re.search(pattern)
         if rv is None:
-            raise ValueError('Invalid number pattern %r' % pattern)
+            raise ValueError(f"Invalid number pattern {pattern!r}")
         return rv.groups()
 
     pos_pattern = pattern
@@ -821,16 +1322,14 @@ def parse_pattern(pattern):
         neg_prefix, _, neg_suffix = _match_number(neg_pattern)
     else:
         pos_prefix, number, pos_suffix = _match_number(pos_pattern)
-        neg_prefix = '-' + pos_prefix
+        neg_prefix = f"-{pos_prefix}"
         neg_suffix = pos_suffix
     if 'E' in number:
         number, exp = number.split('E', 1)
     else:
         exp = None
-    if '@' in number:
-        if '.' in number and '0' in number:
-            raise ValueError('Significant digit patterns can not contain '
-                             '"@" or "0"')
+    if '@' in number and '.' in number and '0' in number:
+        raise ValueError('Significant digit patterns can not contain "@" or "0"')
     if '.' in number:
         integer, fraction = number.rsplit('.', 1)
     else:
@@ -862,20 +1361,37 @@ def parse_pattern(pattern):
         exp_plus = None
         exp_prec = None
     grouping = parse_grouping(integer)
-    return NumberPattern(pattern, (pos_prefix, neg_prefix),
-                         (pos_suffix, neg_suffix), grouping,
-                         int_prec, frac_prec,
-                         exp_prec, exp_plus)
+    return NumberPattern(
+        pattern,
+        (pos_prefix, neg_prefix),
+        (pos_suffix, neg_suffix),
+        grouping,
+        int_prec,
+        frac_prec,
+        exp_prec,
+        exp_plus,
+        number,
+    )
 
 
-class NumberPattern(object):
-
-    def __init__(self, pattern, prefix, suffix, grouping,
-                 int_prec, frac_prec, exp_prec, exp_plus):
+class NumberPattern:
+    def __init__(
+        self,
+        pattern: str,
+        prefix: tuple[str, str],
+        suffix: tuple[str, str],
+        grouping: tuple[int, int],
+        int_prec: tuple[int, int],
+        frac_prec: tuple[int, int],
+        exp_prec: tuple[int, int] | None,
+        exp_plus: bool | None,
+        number_pattern: str | None = None,
+    ) -> None:
         # Metadata of the decomposed parsed pattern.
         self.pattern = pattern
         self.prefix = prefix
         self.suffix = suffix
+        self.number_pattern = number_pattern
         self.grouping = grouping
         self.int_prec = int_prec
         self.frac_prec = frac_prec
@@ -883,10 +1399,10 @@ class NumberPattern(object):
         self.exp_plus = exp_plus
         self.scale = self.compute_scale()
 
-    def __repr__(self):
-        return '<%s %r>' % (type(self).__name__, self.pattern)
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__} {self.pattern!r}>"
 
-    def compute_scale(self):
+    def compute_scale(self) -> Literal[0, 2, 3]:
         """Return the scaling factor to apply to the number before rendering.
 
         Auto-set to a factor of 2 or 3 if presence of a ``%`` or ``‰`` sign is
@@ -896,13 +1412,18 @@ class NumberPattern(object):
         scale = 0
         if '%' in ''.join(self.prefix + self.suffix):
             scale = 2
-        elif u'‰' in ''.join(self.prefix + self.suffix):
+        elif '‰' in ''.join(self.prefix + self.suffix):
             scale = 3
         return scale
 
-    def scientific_notation_elements(self, value, locale):
-        """ Returns normalized scientific notation components of a value.
-        """
+    def scientific_notation_elements(
+        self,
+        value: decimal.Decimal,
+        locale: Locale | str | None,
+        *,
+        numbering_system: Literal["default"] | str = "latn",
+    ) -> tuple[decimal.Decimal, int, str]:
+        """Returns normalized scientific notation components of a value."""
         # Normalize value to only have one lead digit.
         exp = value.adjusted()
         value = value * get_decimal_quantum(exp)
@@ -918,9 +1439,9 @@ class NumberPattern(object):
         # Get exponent sign symbol.
         exp_sign = ''
         if exp < 0:
-            exp_sign = get_minus_sign_symbol(locale)
+            exp_sign = get_minus_sign_symbol(locale, numbering_system=numbering_system)
         elif self.exp_plus:
-            exp_sign = get_plus_sign_symbol(locale)
+            exp_sign = get_plus_sign_symbol(locale, numbering_system=numbering_system)
 
         # Normalize exponent value now that we have the sign.
         exp = abs(exp)
@@ -929,13 +1450,15 @@ class NumberPattern(object):
 
     def apply(
         self,
-        value,
-        locale,
-        currency=None,
-        currency_digits=True,
-        decimal_quantization=True,
-        force_frac=None,
-        group_separator=True,
+        value: float | decimal.Decimal | str,
+        locale: Locale | str | None,
+        currency: str | None = None,
+        currency_digits: bool = True,
+        decimal_quantization: bool = True,
+        force_frac: tuple[int, int] | None = None,
+        group_separator: bool = True,
+        *,
+        numbering_system: Literal["default"] | str = "latn",
     ):
         """Renders into a string a number following the defined pattern.
 
@@ -944,23 +1467,22 @@ class NumberPattern(object):
 
         :param value: The value to format. If this is not a Decimal object,
                       it will be cast to one.
-        :type value: decimal.Decimal|float|int
         :param locale: The locale to use for formatting.
-        :type locale: str|babel.core.Locale
         :param currency: Which currency, if any, to format as.
-        :type currency: str|None
         :param currency_digits: Whether or not to use the currency's precision.
                                 If false, the pattern's precision is used.
-        :type currency_digits: bool
         :param decimal_quantization: Whether decimal numbers should be forcibly
                                      quantized to produce a formatted output
                                      strictly matching the CLDR definition for
                                      the locale.
-        :type decimal_quantization: bool
         :param force_frac: DEPRECATED - a forced override for `self.frac_prec`
                            for a single formatting invocation.
+        :param group_separator: Whether to use the locale's number group separator.
+        :param numbering_system: The numbering system used for formatting number symbols. Defaults to "latn".
+                                 The special value "default" will use the default numbering system of the locale.
         :return: Formatted decimal string.
         :rtype: str
+        :raise UnsupportedNumberingSystemError: If the numbering system is not supported by the locale.
         """
         if not isinstance(value, decimal.Decimal):
             value = decimal.Decimal(str(value))
@@ -973,16 +1495,24 @@ class NumberPattern(object):
 
         # Prepare scientific notation metadata.
         if self.exp_prec:
-            value, exp, exp_sign = self.scientific_notation_elements(value, locale)
+            value, exp, exp_sign = self.scientific_notation_elements(
+                value,
+                locale,
+                numbering_system=numbering_system,
+            )
 
         # Adjust the precision of the fractional part and force it to the
         # currency's if necessary.
         if force_frac:
             # TODO (3.x?): Remove this parameter
-            warnings.warn('The force_frac parameter to NumberPattern.apply() is deprecated.', DeprecationWarning)
+            warnings.warn(
+                'The force_frac parameter to NumberPattern.apply() is deprecated.',
+                DeprecationWarning,
+                stacklevel=2,
+            )
             frac_prec = force_frac
         elif currency and currency_digits:
-            frac_prec = (get_currency_precision(currency), ) * 2
+            frac_prec = (get_currency_precision(currency),) * 2
         else:
             frac_prec = self.frac_prec
 
@@ -998,36 +1528,46 @@ class NumberPattern(object):
         # Render scientific notation.
         if self.exp_prec:
             number = ''.join([
-                self._quantize_value(value, locale, frac_prec, group_separator),
-                get_exponential_symbol(locale),
-                exp_sign,
-                self._format_int(
-                    str(exp), self.exp_prec[0], self.exp_prec[1], locale)])
+                self._quantize_value(value, locale, frac_prec, group_separator, numbering_system=numbering_system),
+                get_exponential_symbol(locale, numbering_system=numbering_system),
+                exp_sign,  # type: ignore  # exp_sign is always defined here
+                self._format_int(str(exp), self.exp_prec[0], self.exp_prec[1], locale, numbering_system=numbering_system),  # type: ignore  # exp is always defined here
+            ])  # fmt: skip
 
-        # Is it a siginificant digits pattern?
+        # Is it a significant digits pattern?
         elif '@' in self.pattern:
-            text = self._format_significant(value,
-                                            self.int_prec[0],
-                                            self.int_prec[1])
+            text = self._format_significant(value, self.int_prec[0], self.int_prec[1])
             a, sep, b = text.partition(".")
-            number = self._format_int(a, 0, 1000, locale)
+            number = self._format_int(a, 0, 1000, locale, numbering_system=numbering_system)
             if sep:
-                number += get_decimal_symbol(locale) + b
+                number += get_decimal_symbol(locale, numbering_system=numbering_system) + b
 
         # A normal number pattern.
         else:
-            number = self._quantize_value(value, locale, frac_prec, group_separator)
+            number = self._quantize_value(
+                value,
+                locale,
+                frac_prec,
+                group_separator,
+                numbering_system=numbering_system,
+            )
 
-        retval = ''.join([
-            self.prefix[is_negative],
-            number,
-            self.suffix[is_negative]])
+        retval = ''.join(
+            (
+                self.prefix[is_negative],
+                number if self.number_pattern != '' else '',
+                self.suffix[is_negative],
+            ),
+        )
 
-        if u'¤' in retval:
-            retval = retval.replace(u'¤¤¤',
-                                    get_currency_name(currency, value, locale))
-            retval = retval.replace(u'¤¤', currency.upper())
-            retval = retval.replace(u'¤', get_currency_symbol(currency, locale))
+        if '¤' in retval and currency is not None:
+            retval = retval.replace('¤¤¤', get_currency_name(currency, value, locale))
+            retval = retval.replace('¤¤', currency.upper())
+            retval = retval.replace('¤', get_currency_symbol(currency, locale))
+
+        # remove single quotes around text, except for doubled single quotes
+        # which are replaced with a single quote
+        retval = re.sub(r"'([^']*)'", lambda m: m.group(1) or "'", retval)
 
         return retval
 
@@ -1051,7 +1591,7 @@ class NumberPattern(object):
     #   - Restore the original position of the decimal point, potentially
     #     padding with zeroes on either side
     #
-    def _format_significant(self, value, minimum, maximum):
+    def _format_significant(self, value: decimal.Decimal, minimum: int, maximum: int) -> str:
         exp = value.adjusted()
         scale = maximum - 1 - exp
         digits = str(value.scaleb(scale).quantize(decimal.Decimal(1)))
@@ -1070,35 +1610,72 @@ class NumberPattern(object):
             ).rstrip('.')
         return result
 
-    def _format_int(self, value, min, max, locale):
+    def _format_int(
+        self,
+        value: str,
+        min: int,
+        max: int,
+        locale: Locale | str | None,
+        *,
+        numbering_system: Literal["default"] | str,
+    ) -> str:
         width = len(value)
         if width < min:
             value = '0' * (min - width) + value
         gsize = self.grouping[0]
         ret = ''
-        symbol = get_group_symbol(locale)
+        symbol = get_group_symbol(locale, numbering_system=numbering_system)
         while len(value) > gsize:
             ret = symbol + value[-gsize:] + ret
             value = value[:-gsize]
             gsize = self.grouping[1]
         return value + ret
 
-    def _quantize_value(self, value, locale, frac_prec, group_separator):
+    def _quantize_value(
+        self,
+        value: decimal.Decimal,
+        locale: Locale | str | None,
+        frac_prec: tuple[int, int],
+        group_separator: bool,
+        *,
+        numbering_system: Literal["default"] | str,
+    ) -> str:
+        # If the number is +/-Infinity, we can't quantize it
+        if value.is_infinite():
+            return get_infinity_symbol(locale, numbering_system=numbering_system)
         quantum = get_decimal_quantum(frac_prec[1])
         rounded = value.quantize(quantum)
-        a, sep, b = "{:f}".format(rounded).partition(".")
+        a, sep, b = f"{rounded:f}".partition(".")
         integer_part = a
         if group_separator:
-            integer_part = self._format_int(a, self.int_prec[0], self.int_prec[1], locale)
-        number = integer_part + self._format_frac(b or '0', locale, frac_prec)
+            integer_part = self._format_int(
+                a,
+                self.int_prec[0],
+                self.int_prec[1],
+                locale,
+                numbering_system=numbering_system,
+            )
+        number = integer_part + self._format_frac(
+            b or '0',
+            locale=locale,
+            force_frac=frac_prec,
+            numbering_system=numbering_system,
+        )
         return number
 
-    def _format_frac(self, value, locale, force_frac=None):
+    def _format_frac(
+        self,
+        value: str,
+        locale: Locale | str | None,
+        force_frac: tuple[int, int] | None = None,
+        *,
+        numbering_system: Literal["default"] | str,
+    ) -> str:
         min, max = force_frac or self.frac_prec
         if len(value) < min:
-            value += ('0' * (min - len(value)))
+            value += '0' * (min - len(value))
         if max == 0 or (min == 0 and int(value) == 0):
             return ''
         while len(value) > min and value[-1] == '0':
             value = value[:-1]
-        return get_decimal_symbol(locale) + value
+        return get_decimal_symbol(locale, numbering_system=numbering_system) + value

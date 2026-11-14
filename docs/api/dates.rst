@@ -21,6 +21,8 @@ Date and Time Formatting
 
 .. autofunction:: format_interval(start, end, skeleton=None, tzinfo=None, fuzzy=True, locale=default_locale('LC_TIME'))
 
+.. autofunction:: format_relative_datetime
+
 Timezone Functionality
 ----------------------
 
@@ -31,8 +33,6 @@ Timezone Functionality
 .. autofunction:: get_timezone_location
 
 .. autofunction:: get_timezone_name
-
-.. autofunction:: get_next_timezone_transition
 
 .. data:: UTC
 
@@ -61,6 +61,8 @@ Data Access
 
 .. autofunction:: get_time_format
 
+.. autofunction:: get_relative_name
+
 Basic Parsing
 -------------
 
@@ -69,3 +71,9 @@ Basic Parsing
 .. autofunction:: parse_time
 
 .. autofunction:: parse_pattern
+
+Exceptions
+----------
+
+.. autoexception:: ParseError
+    :members:

@@ -1,48 +1,26 @@
 test: import-cldr
-	@PYTHONWARNINGS=default python ${PYTHON_TEST_FLAGS} -m pytest
+	python -X utf8 ${PYTHON_TEST_FLAGS} -m pytest ${PYTEST_FLAGS}
 
-test-cov: import-cldr
-	@PYTHONWARNINGS=default python ${PYTHON_TEST_FLAGS} -m pytest --cov=babel
-
-test-env:
-	@virtualenv test-env
-	@test-env/bin/pip install pytest
-	@test-env/bin/pip install --editable .
-
-clean-test-env:
-	@rm -rf test-env
-
-standalone-test: import-cldr test-env
-	@test-env/bin/pytest tests
-
-clean: clean-cldr clean-pyc clean-test-env
+clean: clean-cldr clean-pyc
 
 import-cldr:
-	@python scripts/download_import_cldr.py
+	python scripts/download_import_cldr.py
 
 clean-cldr:
-	@rm -f babel/locale-data/*.dat
-	@rm -f babel/global.dat
+	rm -f babel/locale-data/*.dat
+	rm -f babel/global.dat
 
 clean-pyc:
-	@find . -name '*.pyc' -exec rm {} \;
-	@find . -name '__pycache__' -type d | xargs rm -rf
+	find . -name '*.pyc' -exec rm {} \;
+	find . -name '__pycache__' -type d | xargs rm -rf
 
 develop:
-	@pip install --editable .
+	pip install --editable .
 
-tox-test: import-cldr
-	@tox
+tox-test:
+	tox
 
-upload-docs:
-	$(MAKE) -C docs html dirhtml latex
-	$(MAKE) -C docs/_build/latex all-pdf
-	cd docs/_build/; mv html babel-docs; zip -r babel-docs.zip babel-docs; mv babel-docs html
-	rsync -a docs/_build/dirhtml/ pocoo.org:/var/www/babel.pocoo.org/docs/
-	rsync -a docs/_build/latex/Babel.pdf pocoo.org:/var/www/babel.pocoo.org/docs/babel-docs.pdf
-	rsync -a docs/_build/babel-docs.zip pocoo.org:/var/www/babel.pocoo.org/docs/babel-docs.zip
+update-gha:
+	uvx gha-tools@latest autoupdate --pin all -s specific --first-party-version-strategy=major --write .github/workflows/
 
-release: import-cldr
-	python scripts/make-release.py
-
-.PHONY: test develop tox-test clean-pyc clean-cldr import-cldr clean release upload-docs clean-test-env standalone-test
+.PHONY: test develop tox-test clean-pyc clean-cldr import-cldr clean update-gha

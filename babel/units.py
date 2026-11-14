@@ -1,15 +1,33 @@
-# -- encoding: UTF-8 --
+from __future__ import annotations
+
+import decimal
+import warnings
+from typing import Literal
 
 from babel.core import Locale
-from babel.numbers import format_decimal, LC_NUMERIC
+from babel.numbers import LC_NUMERIC, format_decimal
+
+_DEPRECATED_UNIT_IDS: dict[str, str] = {
+    # Unit IDs deprecated in CLDR 48
+    "concentr-permillion": "concentr-part-per-1e6",
+    "concentr-portion": "concentr-part",
+    "concentr-portion-per-1e9": "concentr-part-per-1e9",
+    "permillion": "part-per-1e6",
+    "portion": "part",
+    "portion-per-1e9": "part-per-1e9",
+}
 
 
 class UnknownUnitError(ValueError):
-    def __init__(self, unit, locale):
-        ValueError.__init__(self, "%s is not a known unit in %s" % (unit, locale))
+    def __init__(self, unit: str, locale: Locale) -> None:
+        ValueError.__init__(self, f"{unit} is not a known unit in {locale}")
 
 
-def get_unit_name(measurement_unit, length='long', locale=LC_NUMERIC):
+def get_unit_name(
+    measurement_unit: str,
+    length: Literal['short', 'long', 'narrow'] = 'long',
+    locale: Locale | str | None = None,
+) -> str | None:
     """
     Get the display name for a measurement unit in the given locale.
 
@@ -28,19 +46,19 @@ def get_unit_name(measurement_unit, length='long', locale=LC_NUMERIC):
                              https://unicode.org/repos/cldr/tags/latest/common/validity/unit.xml
 
     :param length: "short", "long" or "narrow"
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
     :return: The unit display name, or None.
     """
-    locale = Locale.parse(locale)
+    locale = Locale.parse(locale or LC_NUMERIC)
     unit = _find_unit_pattern(measurement_unit, locale=locale)
     if not unit:
         raise UnknownUnitError(unit=measurement_unit, locale=locale)
     return locale.unit_display_names.get(unit, {}).get(length)
 
 
-def _find_unit_pattern(unit_id, locale=LC_NUMERIC):
+def _find_unit_pattern(unit_id: str, locale: Locale | str | None = None) -> str | None:
     """
-    Expand an unit into a qualified form.
+    Expand a unit into a qualified form.
 
     Known units can be found in the CLDR Unit Validity XML file:
     https://unicode.org/repos/cldr/tags/latest/common/validity/unit.xml
@@ -55,46 +73,71 @@ def _find_unit_pattern(unit_id, locale=LC_NUMERIC):
     :param unit_id: the code of a measurement unit.
     :return: A key to the `unit_patterns` mapping, or None.
     """
-    locale = Locale.parse(locale)
-    unit_patterns = locale._data["unit_patterns"]
+    locale = Locale.parse(locale or LC_NUMERIC)
+    unit_patterns: dict[str, str] = locale._data["unit_patterns"]
     if unit_id in unit_patterns:
         return unit_id
+
+    # Only if a direct hit didn't work, try deprecated units...
+    new_id = _DEPRECATED_UNIT_IDS.get(unit_id)
+    if new_id is not None:
+        warnings.warn(
+            f"Unit identifier {unit_id!r} is deprecated; use {new_id!r} instead.",
+            DeprecationWarning,
+            stacklevel=4,
+        )
+        if new_id in unit_patterns:
+            return new_id
+        unit_id = new_id
+
+    # ... and finally fuzzy matching.
     for unit_pattern in sorted(unit_patterns, key=len):
         if unit_pattern.endswith(unit_id):
             return unit_pattern
+    return None
 
 
-def format_unit(value, measurement_unit, length='long', format=None, locale=LC_NUMERIC):
+def format_unit(
+    value: str | float | decimal.Decimal,
+    measurement_unit: str,
+    length: Literal['short', 'long', 'narrow'] = 'long',
+    format: str | None = None,
+    locale: Locale | str | None = None,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str:
     """Format a value of a given unit.
 
     Values are formatted according to the locale's usual pluralization rules
     and number formats.
 
     >>> format_unit(12, 'length-meter', locale='ro_RO')
-    u'12 metri'
+    '12 metri'
     >>> format_unit(15.5, 'length-mile', locale='fi_FI')
-    u'15,5 mailia'
+    '15,5 mailia'
     >>> format_unit(1200, 'pressure-millimeter-ofhg', locale='nb')
-    u'1\\xa0200 millimeter kvikks\\xf8lv'
+    '1\\xa0200 millimeter kvikks\\xf8lv'
     >>> format_unit(270, 'ton', locale='en')
-    u'270 tons'
+    '270 tons'
+    >>> format_unit(1234.5, 'kilogram', locale='ar_EG', numbering_system='default')
+    '1٬234٫5 كيلوغرام'
 
     Number formats may be overridden with the ``format`` parameter.
 
     >>> import decimal
     >>> format_unit(decimal.Decimal("-42.774"), 'temperature-celsius', 'short', format='#.0', locale='fr')
-    u'-42,8\\u202f\\xb0C'
+    '-42,8\\u202f\\xb0C'
 
     The locale's usual pluralization rules are respected.
 
     >>> format_unit(1, 'length-meter', locale='ro_RO')
-    u'1 metru'
+    '1 metru'
     >>> format_unit(0, 'length-mile', locale='cy')
-    u'0 mi'
+    '0 mi'
     >>> format_unit(1, 'length-mile', locale='cy')
-    u'1 filltir'
+    '1 filltir'
     >>> format_unit(3, 'length-mile', locale='cy')
-    u'3 milltir'
+    '3 milltir'
 
     >>> format_unit(15, 'length-horse', locale='fi')
     Traceback (most recent call last):
@@ -103,40 +146,57 @@ def format_unit(value, measurement_unit, length='long', format=None, locale=LC_N
 
     .. versionadded:: 2.2.0
 
-    :param value: the value to format. If this is a string, no number formatting will be attempted.
+    :param value: the value to format. If this is a string, no number formatting will be attempted and the number is assumed to be singular for the purposes of unit formatting.
     :param measurement_unit: the code of a measurement unit.
                              Known units can be found in the CLDR Unit Validity XML file:
                              https://unicode.org/repos/cldr/tags/latest/common/validity/unit.xml
     :param length: "short", "long" or "narrow"
     :param format: An optional format, as accepted by `format_decimal`.
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
+    :param numbering_system: The numbering system used for formatting number symbols. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
+    :raise `UnsupportedNumberingSystemError`: If the numbering system is not supported by the locale.
     """
-    locale = Locale.parse(locale)
+    locale = Locale.parse(locale or LC_NUMERIC)
 
     q_unit = _find_unit_pattern(measurement_unit, locale=locale)
     if not q_unit:
         raise UnknownUnitError(unit=measurement_unit, locale=locale)
-    unit_patterns = locale._data["unit_patterns"][q_unit].get(length, {})
 
     if isinstance(value, str):  # Assume the value is a preformatted singular.
         formatted_value = value
         plural_form = "one"
     else:
-        formatted_value = format_decimal(value, format, locale)
+        formatted_value = format_decimal(
+            value,
+            format,
+            locale,
+            numbering_system=numbering_system,
+        )
         plural_form = locale.plural_form(value)
 
-    if plural_form in unit_patterns:
-        return unit_patterns[plural_form].format(formatted_value)
+    length_patterns = locale._data["unit_patterns"][q_unit].get(length, {})  # resolves aliases
+    # Fall back from the correct plural form to "other"
+    # (this is specified in LDML "Lateral Inheritance")
+    pat = length_patterns.get(plural_form) or length_patterns.get("other")
+    if pat:
+        return pat.format(formatted_value)
 
     # Fall back to a somewhat bad representation.
     # nb: This is marked as no-cover, as the current CLDR seemingly has no way for this to happen.
-    return '%s %s' % (  # pragma: no cover
-        formatted_value,
-        (get_unit_name(measurement_unit, length=length, locale=locale) or measurement_unit)
+    fallback_name = get_unit_name(  # pragma: no cover
+        measurement_unit,
+        length=length,
+        locale=locale,
     )
+    return f"{formatted_value} {fallback_name or measurement_unit}"  # pragma: no cover
 
 
-def _find_compound_unit(numerator_unit, denominator_unit, locale=LC_NUMERIC):
+def _find_compound_unit(
+    numerator_unit: str,
+    denominator_unit: str,
+    locale: Locale | str | None = None,
+) -> str | None:
     """
     Find a predefined compound unit pattern.
 
@@ -156,39 +216,48 @@ def _find_compound_unit(numerator_unit, denominator_unit, locale=LC_NUMERIC):
 
     :param numerator_unit: The numerator unit's identifier
     :param denominator_unit: The denominator unit's identifier
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
     :return: A key to the `unit_patterns` mapping, or None.
     :rtype: str|None
     """
-    locale = Locale.parse(locale)
+    locale = Locale.parse(locale or LC_NUMERIC)
 
     # Qualify the numerator and denominator units.  This will turn possibly partial
     # units like "kilometer" or "hour" into actual units like "length-kilometer" and
     # "duration-hour".
 
-    numerator_unit = _find_unit_pattern(numerator_unit, locale=locale)
-    denominator_unit = _find_unit_pattern(denominator_unit, locale=locale)
+    resolved_numerator_unit = _find_unit_pattern(numerator_unit, locale=locale)
+    resolved_denominator_unit = _find_unit_pattern(denominator_unit, locale=locale)
 
     # If either was not found, we can't possibly build a suitable compound unit either.
-    if not (numerator_unit and denominator_unit):
+    if not (resolved_numerator_unit and resolved_denominator_unit):
         return None
 
     # Since compound units are named "speed-kilometer-per-hour", we'll have to slice off
     # the quantities (i.e. "length", "duration") from both qualified units.
 
-    bare_numerator_unit = numerator_unit.split("-", 1)[-1]
-    bare_denominator_unit = denominator_unit.split("-", 1)[-1]
+    bare_numerator_unit = resolved_numerator_unit.split("-", 1)[-1]
+    bare_denominator_unit = resolved_denominator_unit.split("-", 1)[-1]
 
     # Now we can try and rebuild a compound unit specifier, then qualify it:
 
-    return _find_unit_pattern("%s-per-%s" % (bare_numerator_unit, bare_denominator_unit), locale=locale)
+    return _find_unit_pattern(
+        f"{bare_numerator_unit}-per-{bare_denominator_unit}",
+        locale=locale,
+    )
 
 
 def format_compound_unit(
-    numerator_value, numerator_unit=None,
-    denominator_value=1, denominator_unit=None,
-    length='long', format=None, locale=LC_NUMERIC
-):
+    numerator_value: str | float | decimal.Decimal,
+    numerator_unit: str | None = None,
+    denominator_value: str | float | decimal.Decimal = 1,
+    denominator_unit: str | None = None,
+    length: Literal["short", "long", "narrow"] = "long",
+    format: str | None = None,
+    locale: Locale | str | None = None,
+    *,
+    numbering_system: Literal["default"] | str = "latn",
+) -> str | None:
     """
     Format a compound number value, i.e. "kilometers per hour" or similar.
 
@@ -207,14 +276,17 @@ def format_compound_unit(
     >>> format_compound_unit(32.5, "ton", 15, denominator_unit="hour", locale="en")
     '32.5 tons per 15 hours'
 
+    >>> format_compound_unit(1234.5, "ton", 15, denominator_unit="hour", locale="ar_EG", numbering_system="arab")
+    '1٬234٫5 طن لكل 15 ساعة'
+
     >>> format_compound_unit(160, denominator_unit="square-meter", locale="fr")
     '160 par m\\xe8tre carr\\xe9'
 
     >>> format_compound_unit(4, "meter", "ratakisko", length="short", locale="fi")
     '4 m/ratakisko'
 
-    >>> format_compound_unit(35, "minute", denominator_unit="fathom", locale="sv")
-    '35 minuter per famn'
+    >>> format_compound_unit(35, "minute", denominator_unit="nautical-mile", locale="sv")
+    '35 minuter per nautisk mil'
 
     >>> from babel.numbers import format_currency
     >>> format_compound_unit(format_currency(35, "JPY", locale="de"), denominator_unit="liter", locale="de")
@@ -230,17 +302,27 @@ def format_compound_unit(
     :param denominator_unit: The denominator unit. See `format_unit`.
     :param length: The formatting length. "short", "long" or "narrow"
     :param format: An optional format, as accepted by `format_decimal`.
-    :param locale: the `Locale` object or locale identifier
+    :param locale: the `Locale` object or locale identifier. Defaults to the system numeric locale.
+    :param numbering_system: The numbering system used for formatting number symbols. Defaults to "latn".
+                             The special value "default" will use the default numbering system of the locale.
     :return: A formatted compound value.
+    :raise `UnsupportedNumberingSystemError`: If the numbering system is not supported by the locale.
     """
-    locale = Locale.parse(locale)
+    locale = Locale.parse(locale or LC_NUMERIC)
 
     # Look for a specific compound unit first...
 
     if numerator_unit and denominator_unit and denominator_value == 1:
         compound_unit = _find_compound_unit(numerator_unit, denominator_unit, locale=locale)
         if compound_unit:
-            return format_unit(numerator_value, compound_unit, length=length, format=format, locale=locale)
+            return format_unit(
+                numerator_value,
+                compound_unit,
+                length=length,
+                format=format,
+                locale=locale,
+                numbering_system=numbering_system,
+            )
 
     # ... failing that, construct one "by hand".
 
@@ -248,17 +330,32 @@ def format_compound_unit(
         formatted_numerator = numerator_value
     elif numerator_unit:  # Numerator has unit
         formatted_numerator = format_unit(
-            numerator_value, numerator_unit, length=length, format=format, locale=locale
+            numerator_value,
+            numerator_unit,
+            length=length,
+            format=format,
+            locale=locale,
+            numbering_system=numbering_system,
         )
     else:  # Unitless numerator
-        formatted_numerator = format_decimal(numerator_value, format=format, locale=locale)
+        formatted_numerator = format_decimal(
+            numerator_value,
+            format=format,
+            locale=locale,
+            numbering_system=numbering_system,
+        )
 
     if isinstance(denominator_value, str):  # Denominator is preformatted
         formatted_denominator = denominator_value
     elif denominator_unit:  # Denominator has unit
         if denominator_value == 1:  # support perUnitPatterns when the denominator is 1
             denominator_unit = _find_unit_pattern(denominator_unit, locale=locale)
-            per_pattern = locale._data["unit_patterns"].get(denominator_unit, {}).get(length, {}).get("per")
+            per_pattern = (
+                locale._data["unit_patterns"]
+                .get(denominator_unit, {})
+                .get(length, {})
+                .get("per")
+            )
             if per_pattern:
                 return per_pattern.format(formatted_numerator)
             # See TR-35's per-unit pattern algorithm, point 3.2.
@@ -267,12 +364,27 @@ def format_compound_unit(
             denominator_value = ""
 
         formatted_denominator = format_unit(
-            denominator_value, denominator_unit, length=length, format=format, locale=locale
+            denominator_value,
+            measurement_unit=(denominator_unit or ""),
+            length=length,
+            format=format,
+            locale=locale,
+            numbering_system=numbering_system,
         ).strip()
     else:  # Bare denominator
-        formatted_denominator = format_decimal(denominator_value, format=format, locale=locale)
+        formatted_denominator = format_decimal(
+            denominator_value,
+            format=format,
+            locale=locale,
+            numbering_system=numbering_system,
+        )
 
     # TODO: this doesn't support "compound_variations" (or "prefix"), and will fall back to the "x/y" representation
-    per_pattern = locale._data["compound_unit_patterns"].get("per", {}).get(length, {}).get("compound", "{0}/{1}")
+    per_pattern = (
+        locale._data["compound_unit_patterns"]
+        .get("per", {})
+        .get(length, {})
+        .get("compound", "{0}/{1}")
+    )
 
     return per_pattern.format(formatted_numerator, formatted_denominator)

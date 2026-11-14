@@ -1,27 +1,32 @@
-# -*- coding: utf-8 -*-
 """
-    babel.util
-    ~~~~~~~~~~
+babel.util
+~~~~~~~~~~
 
-    Various utility classes and functions.
+Various utility classes and functions.
 
-    :copyright: (c) 2013-2021 by the Babel Team.
-    :license: BSD, see LICENSE for more details.
+:copyright: (c) 2013-2026 by the Babel Team.
+:license: BSD, see LICENSE for more details.
 """
+
+from __future__ import annotations
 
 import codecs
-import collections
-from datetime import timedelta, tzinfo
+import datetime
 import os
 import re
 import textwrap
-import pytz as _pytz
-from babel import localtime
+import warnings
+from collections.abc import Generator, Iterable
+from typing import IO, Any, TypeVar
+
+from babel import dates, localtime
 
 missing = object()
 
+_T = TypeVar("_T")
 
-def distinct(iterable):
+
+def distinct(iterable: Iterable[_T]) -> Generator[_T, None, None]:
     """Yield all items in an iterable collection that are distinct.
 
     Unlike when using sets for a similar effect, the original ordering of the
@@ -40,12 +45,15 @@ def distinct(iterable):
             yield item
             seen.add(item)
 
+
 # Regexp to match python magic encoding line
 PYTHON_MAGIC_COMMENT_re = re.compile(
-    br'[ \t\f]* \# .* coding[=:][ \t]*([-\w.]+)', re.VERBOSE)
+    rb'[ \t\f]* \# .* coding[=:][ \t]*([-\w.]+)',
+    flags=re.VERBOSE,
+)
 
 
-def parse_encoding(fp):
+def parse_encoding(fp: IO[bytes]) -> str | None:
     """Deduce the encoding of a source file from magic comment.
 
     It does this in the same way as the `Python interpreter`__
@@ -62,12 +70,13 @@ def parse_encoding(fp):
         line1 = fp.readline()
         has_bom = line1.startswith(codecs.BOM_UTF8)
         if has_bom:
-            line1 = line1[len(codecs.BOM_UTF8):]
+            line1 = line1[len(codecs.BOM_UTF8) :]
 
         m = PYTHON_MAGIC_COMMENT_re.match(line1)
         if not m:
             try:
                 import ast
+
                 ast.parse(line1.decode('latin-1'))
             except (ImportError, SyntaxError, UnicodeEncodeError):
                 # Either it's a real syntax error, in which case the source is
@@ -83,9 +92,7 @@ def parse_encoding(fp):
             if m:
                 magic_comment_encoding = m.group(1).decode('latin-1')
                 if magic_comment_encoding != 'utf-8':
-                    raise SyntaxError(
-                        'encoding problem: {0} with BOM'.format(
-                            magic_comment_encoding))
+                    raise SyntaxError(f"encoding problem: {magic_comment_encoding} with BOM")
             return 'utf-8'
         elif m:
             return m.group(1).decode('latin-1')
@@ -95,15 +102,15 @@ def parse_encoding(fp):
         fp.seek(pos)
 
 
-PYTHON_FUTURE_IMPORT_re = re.compile(
-    r'from\s+__future__\s+import\s+\(*(.+)\)*')
+PYTHON_FUTURE_IMPORT_re = re.compile(r'from\s+__future__\s+import\s+\(*(.+)\)*')
 
 
-def parse_future_flags(fp, encoding='latin-1'):
+def parse_future_flags(fp: IO[bytes], encoding: str = 'latin-1') -> int:
     """Parse the compiler flags by :mod:`__future__` from the given Python
     code.
     """
     import __future__
+
     pos = fp.tell()
     fp.seek(0)
     flags = 0
@@ -131,7 +138,7 @@ def parse_future_flags(fp, encoding='latin-1'):
     return flags
 
 
-def pathmatch(pattern, filename):
+def pathmatch(pattern: str, filename: str) -> bool:
     """Extended pathname pattern matching.
 
     This function is similar to what is provided by the ``fnmatch`` module in
@@ -192,20 +199,46 @@ def pathmatch(pattern, filename):
             buf.append(symbols[part])
         elif part:
             buf.append(re.escape(part))
-    match = re.match(''.join(buf) + '$', filename.replace(os.sep, '/'))
+    match = re.match(f"{''.join(buf)}$", filename.replace(os.sep, "/"))
     return match is not None
 
 
 class TextWrapper(textwrap.TextWrapper):
     wordsep_re = re.compile(
-        r'(\s+|'                                  # any whitespace
-        r'(?<=[\w\!\"\'\&\.\,\?])-{2,}(?=\w))'    # em-dash
+        r'(\s+|'  # any whitespace
+        r'(?<=[\w\!\"\'\&\.\,\?])-{2,}(?=\w))',  # em-dash
     )
 
+    # e.g. '\u2068foo bar.py\u2069:42'
+    _enclosed_filename_re = re.compile(r'(\u2068[^\u2068]+?\u2069(?::-?\d+)?)')
 
-def wraptext(text, width=70, initial_indent='', subsequent_indent=''):
+    def _split(self, text):
+        """Splits the text into indivisible chunks while ensuring that file names
+        containing spaces are not broken up.
+        """
+        enclosed_filename_start = '\u2068'
+        if enclosed_filename_start not in text:
+            # There are no file names which contain spaces, fallback to the default implementation
+            return super()._split(text)
+
+        chunks = []
+        for chunk in re.split(self._enclosed_filename_re, text):
+            if chunk.startswith(enclosed_filename_start):
+                chunks.append(chunk)
+            else:
+                chunks.extend(super()._split(chunk))
+        return [c for c in chunks if c]
+
+
+def wraptext(
+    text: str,
+    width: int = 70,
+    initial_indent: str = '',
+    subsequent_indent: str = '',
+) -> list[str]:
     """Simple wrapper around the ``textwrap.wrap`` function in the standard
-    library. This version does not wrap lines on hyphens in words.
+    library. This version does not wrap lines on hyphens in words. It also
+    does not wrap PO file locations containing spaces.
 
     :param text: the text to wrap
     :param width: the maximum line width
@@ -214,52 +247,72 @@ def wraptext(text, width=70, initial_indent='', subsequent_indent=''):
     :param subsequent_indent: string that will be prepended to all lines save
                               the first of wrapped output
     """
-    wrapper = TextWrapper(width=width, initial_indent=initial_indent,
-                          subsequent_indent=subsequent_indent,
-                          break_long_words=False)
-    return wrapper.wrap(text)
+    warnings.warn(
+        "`babel.util.wraptext` is deprecated and will be removed in a future version of Babel. "
+        "If you need this functionality, use the `babel.util.TextWrapper` class directly.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return TextWrapper(
+        width=width,
+        initial_indent=initial_indent,
+        subsequent_indent=subsequent_indent,
+        break_long_words=False,
+    ).wrap(text)
 
 
 # TODO (Babel 3.x): Remove this re-export
-odict = collections.OrderedDict
+odict = dict
 
 
-class FixedOffsetTimezone(tzinfo):
-    """Fixed offset in minutes east from UTC."""
+class FixedOffsetTimezone(datetime.tzinfo):
+    """
+    Fixed offset in minutes east from UTC.
 
-    def __init__(self, offset, name=None):
-        self._offset = timedelta(minutes=offset)
+    DEPRECATED: Use the standard library `datetime.timezone` instead.
+    """
+
+    # TODO (Babel 3.x): Remove this class
+
+    def __init__(self, offset: float, name: str | None = None) -> None:
+        warnings.warn(
+            "`FixedOffsetTimezone` is deprecated and will be removed in a future version of Babel. "
+            "Use the standard library `datetime.timezone` class.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self._offset = datetime.timedelta(minutes=offset)
         if name is None:
             name = 'Etc/GMT%+d' % offset
         self.zone = name
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.zone
 
-    def __repr__(self):
-        return '<FixedOffset "%s" %s>' % (self.zone, self._offset)
+    def __repr__(self) -> str:
+        return f'<FixedOffset "{self.zone}" {self._offset}>'
 
-    def utcoffset(self, dt):
+    def utcoffset(self, dt: datetime.datetime) -> datetime.timedelta:
         return self._offset
 
-    def tzname(self, dt):
+    def tzname(self, dt: datetime.datetime) -> str:
         return self.zone
 
-    def dst(self, dt):
+    def dst(self, dt: datetime.datetime) -> datetime.timedelta:
         return ZERO
 
 
 # Export the localtime functionality here because that's
 # where it was in the past.
-UTC = _pytz.utc
-LOCALTZ = localtime.LOCALTZ
+# TODO(3.0): remove these aliases
+UTC = dates.UTC
+LOCALTZ = dates.LOCALTZ
 get_localzone = localtime.get_localzone
-
 STDOFFSET = localtime.STDOFFSET
 DSTOFFSET = localtime.DSTOFFSET
 DSTDIFF = localtime.DSTDIFF
 ZERO = localtime.ZERO
 
 
-def _cmp(a, b):
+def _cmp(a: Any, b: Any):
     return (a > b) - (a < b)

@@ -19,9 +19,9 @@ Babel provides functions for locale-specific formatting of those objects in its
 
     >>> d = date(2007, 4, 1)
     >>> format_date(d, locale='en')
-    u'Apr 1, 2007'
+    'Apr 1, 2007'
     >>> format_date(d, locale='de_DE')
-    u'01.04.2007'
+    '01.04.2007'
 
 As this example demonstrates, Babel will automatically choose a date format
 that is appropriate for the requested locale.
@@ -39,11 +39,11 @@ For example:
 .. code-block:: pycon
 
     >>> format_date(d, format='short', locale='en')
-    u'4/1/07'
+    '4/1/07'
     >>> format_date(d, format='long', locale='en')
-    u'April 1, 2007'
+    'April 1, 2007'
     >>> format_date(d, format='full', locale='en')
-    u'Sunday, April 1, 2007'
+    'Sunday, April 1, 2007'
 
 Core Time Concepts
 ==================
@@ -67,9 +67,9 @@ local time when returning dates to users.  At that point the timezone the
 user has selected can usually be established and Babel can automatically
 rebase the time for you.
 
-To get the current time use the :meth:`~datetime.datetime.utcnow` method
-of the :class:`~datetime.datetime` object.  It will return a naive
-:class:`~datetime.datetime` object in UTC.
+To get the current time use the :meth:`~datetime.datetime.now` method
+of the :class:`~datetime.datetime` object,
+passing :attr:`~datetime.timezone.utc` to it as the timezone.
 
 For more information about timezones see :ref:`timezone-support`.
 
@@ -105,26 +105,26 @@ For example:
 
     >>> d = date(2007, 4, 1)
     >>> format_date(d, "EEE, MMM d, ''yy", locale='en')
-    u"Sun, Apr 1, '07"
+    "Sun, Apr 1, '07"
     >>> format_date(d, "EEEE, d.M.yyyy", locale='de')
-    u'Sonntag, 1.4.2007'
+    'Sonntag, 1.4.2007'
 
     >>> t = time(15, 30)
     >>> format_time(t, "hh 'o''clock' a", locale='en')
-    u"03 o'clock PM"
+    "03 o'clock PM"
     >>> format_time(t, 'H:mm a', locale='de')
-    u'15:30 nachm.'
+    '15:30 nachm.'
 
     >>> dt = datetime(2007, 4, 1, 15, 30)
     >>> format_datetime(dt, "yyyyy.MMMM.dd GGG hh:mm a", locale='en')
-    u'02007.April.01 AD 03:30 PM'
+    '02007.April.01 AD 03:30 PM'
 
 The syntax for custom datetime format patterns is described in detail in the
 the `Locale Data Markup Language specification`_. The following table is just a
 relatively brief overview.
 
  .. _`Locale Data Markup Language specification`:
-    https://unicode.org/reports/tr35/#Date_Format_Patterns
+    https://unicode.org/reports/tr35/tr35-dates.html#Date_Format_Patterns
 
 Date Fields
 -----------
@@ -173,7 +173,7 @@ Date Fields
   |          +--------+--------------------------------------------------------+
   |          | ``F``  | Day of week in month.                                  |
   |          +--------+--------------------------------------------------------+
-  |          | ``g``  | ??                                                     |
+  |          | ``g``  | Modified Julian day (numeric).                         |
   +----------+--------+--------------------------------------------------------+
   | Week day | ``E``  | Day of week. Use one through three letters for the     |
   |          |        | short day, or four for the full name, or five for the  |
@@ -206,7 +206,7 @@ Time Fields
   +----------+--------+--------------------------------------------------------+
   | Second   | ``s``  | Use one or two for zero places padding.                |
   |          +--------+--------------------------------------------------------+
-  |          | ``S``  | Fractional second, rounds to the count of letters.     |
+  |          | ``S``  | Fractional second, truncates to the count of letters.  |
   |          +--------+--------------------------------------------------------+
   |          | ``A``  | Milliseconds in day.                                   |
   +----------+--------+--------------------------------------------------------+
@@ -245,7 +245,7 @@ difference, and displays that:
     >>> from babel.dates import format_timedelta
     >>> delta = timedelta(days=6)
     >>> format_timedelta(delta, locale='en_US')
-    u'1 week'
+    '1 week'
 
 The resulting strings are based from the CLDR data, and are properly
 pluralized depending on the plural rules of the locale and the calculated
@@ -260,9 +260,9 @@ can limit the smallest unit to display:
 
     >>> delta = timedelta(days=6)
     >>> format_timedelta(delta, threshold=1.2, locale='en_US')
-    u'6 days'
+    '6 days'
     >>> format_timedelta(delta, granularity='month', locale='en_US')
-    u'1 month'
+    '1 month'
 
 .. _timezone-support:
 
@@ -276,11 +276,9 @@ class, which you need appropriate implementations for to actually use in your
 application. Babel includes a ``tzinfo`` implementation for UTC (Universal
 Time).
 
-Babel uses `pytz`_ for real timezone support which includes the
-definitions of practically all of the time-zones used on the world, as
-well as important functions for reliably converting from UTC to local
-time, and vice versa.  The module is generally wrapped for you so you can
-directly interface with it from within Babel:
+Babel uses either `zoneinfo`_ or `pytz`_ for timezone support.
+If pytz is installed, it is preferred over the standard library's zoneinfo.
+You can directly interface with either of these modules from within Babel:
 
 .. code-block:: pycon
 
@@ -289,20 +287,20 @@ directly interface with it from within Babel:
     >>> dt = datetime(2007, 4, 1, 15, 30, tzinfo=UTC)
     >>> eastern = get_timezone('US/Eastern')
     >>> format_datetime(dt, 'H:mm Z', tzinfo=eastern, locale='en_US')
-    u'11:30 -0400'
+    '11:30 -0400'
 
 The recommended approach to deal with different time-zones in a Python
 application is to always use UTC internally, and only convert from/to the users
 time-zone when accepting user input and displaying date/time data, respectively.
-You can use Babel together with ``pytz`` to apply a time-zone to any
-``datetime`` or ``time`` object for display, leaving the original information
-unchanged:
+You can use Babel together with ``zoneinfo`` or ``pytz`` to apply a time-zone
+to any ``datetime`` or ``time`` object for display, leaving the original
+information unchanged:
 
 .. code-block:: pycon
 
     >>> british = get_timezone('Europe/London')
     >>> format_datetime(dt, 'H:mm zzzz', tzinfo=british, locale='en_US')
-    u'16:30 British Summer Time'
+    '16:30 British Summer Time'
 
 Here, the given UTC time is adjusted to the "Europe/London" time-zone, and
 daylight savings time is taken into account. Daylight savings time is also
@@ -310,25 +308,7 @@ applied to ``format_time``, but because the actual date is unknown in that
 case, the current day is assumed to determine whether DST or standard time
 should be used.
 
-For many timezones it's also possible to ask for the next timezone
-transition.  This for instance is useful to answer the question “when do I
-have to move the clock forward next”:
-
-.. code-block:: pycon
-
-    >>> t = get_next_timezone_transition('Europe/Vienna', datetime(2011, 3, 2))
-    >>> t
-    <TimezoneTransition CET -> CEST (2011-03-27 01:00:00)>
-    >>> t.from_offset
-    3600.0
-    >>> t.to_offset
-    7200.0
-    >>> t.from_tz
-    'CET'
-    >>> t.to_tz
-    'CEST'
-
-Lastly Babel also provides support for working with the local timezone of
+Babel also provides support for working with the local timezone of
 your operating system.  It's provided through the ``LOCALTZ`` constant:
 
 .. code-block:: pycon
@@ -337,9 +317,9 @@ your operating system.  It's provided through the ``LOCALTZ`` constant:
     >>> LOCALTZ
     <DstTzInfo 'Europe/Vienna' CET+1:00:00 STD>
     >>> get_timezone_name(LOCALTZ)
-    u'Central European Time'
+    'Central European Time'
 
-.. _pytz: http://pytz.sourceforge.net/
+.. _pytz: https://pythonhosted.org/pytz/
 
 
 Localized Time-zone Names
@@ -358,7 +338,7 @@ functions in the ``babel.dates`` module, most importantly the
 
     >>> tz = get_timezone('Europe/Berlin')
     >>> get_timezone_name(tz, locale=Locale.parse('pt_PT'))
-    u'Hora da Europa Central'
+    'Hora da Europa Central'
 
 You can pass the function either a ``datetime.tzinfo`` object, or a
 ``datetime.date`` or ``datetime.datetime`` object. If you pass an actual date,
@@ -370,9 +350,10 @@ display a list of time-zones to the user.
 .. code-block:: pycon
 
     >>> from datetime import datetime
+    >>> from babel.dates import _localize
 
-    >>> dt = tz.localize(datetime(2007, 8, 15))
+    >>> dt = _localize(tz, datetime(2007, 8, 15))
     >>> get_timezone_name(dt, locale=Locale.parse('de_DE'))
-    u'Mitteleurop\xe4ische Sommerzeit'
+    'Mitteleuropäische Sommerzeit'
     >>> get_timezone_name(tz, locale=Locale.parse('de_DE'))
-    u'Mitteleurop\xe4ische Zeit'
+    'Mitteleuropäische Zeit'

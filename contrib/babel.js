@@ -6,16 +6,16 @@
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
- * are also available at http://babel.edgewall.org/wiki/License.
+ * are also available at https://github.com/python-babel/babel/blob/master/LICENSE.
  *
  * This software consists of voluntary contributions made by many
  * individuals. For the exact contribution history, see the revision
- * history and logs, available at http://babel.edgewall.org/log/.
+ * history and logs, available at https://github.com/python-babel/babel/commits/master/.
  */
 
 /**
  * A simple module that provides a gettext like translation interface.
- * The catalog passed to load() must be a object conforming to this
+ * The catalog passed to load() must be an object conforming to this
  * interface::
  *
  *    {
